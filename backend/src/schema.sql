@@ -1,0 +1,84 @@
+-- Agent Pipeline Builder schema.
+-- Runs on PGlite (PostgreSQL 16 compiled to WASM) — gen_random_uuid(), UUID,
+-- TIMESTAMPTZ and NUMERIC are all native, so this is portable to a real
+-- PostgreSQL server unchanged.
+
+CREATE TABLE IF NOT EXISTS pipelines (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name        TEXT NOT NULL,
+  description TEXT,
+  created_at  TIMESTAMPTZ DEFAULT now(),
+  updated_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS stations (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  pipeline_id   UUID REFERENCES pipelines(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  system_prompt TEXT NOT NULL,
+  model         TEXT,              -- optional per-station model override
+  style         TEXT,              -- building style for the UI (cottage, shop, …)
+  position_x    FLOAT NOT NULL,
+  position_y    FLOAT NOT NULL,
+  created_at    TIMESTAMPTZ DEFAULT now()
+);
+
+-- Upgrade older databases that predate the style column (idempotent on boot).
+ALTER TABLE stations ADD COLUMN IF NOT EXISTS style TEXT;
+
+CREATE TABLE IF NOT EXISTS connections (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  pipeline_id     UUID REFERENCES pipelines(id) ON DELETE CASCADE,
+  from_station_id UUID REFERENCES stations(id) ON DELETE CASCADE,
+  to_station_id   UUID REFERENCES stations(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  pipeline_id UUID REFERENCES pipelines(id) ON DELETE CASCADE,
+  status      TEXT NOT NULL DEFAULT 'pending', -- pending | running | completed | failed
+  input       TEXT,                            -- kickoff input handed to root stations
+  error       TEXT,
+  started_at  TIMESTAMPTZ,
+  finished_at TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS run_steps (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id       UUID REFERENCES runs(id) ON DELETE CASCADE,
+  station_id   UUID REFERENCES stations(id) ON DELETE CASCADE,
+  status       TEXT NOT NULL DEFAULT 'pending', -- pending | running | completed | failed
+  tokens_used  INTEGER,
+  cost_usd     NUMERIC(10, 6),
+  error        TEXT,
+  started_at   TIMESTAMPTZ,
+  finished_at  TIMESTAMPTZ
+);
+
+-- Cosmetic map decorations (trees, roads, fountains, …). Purely visual — never
+-- part of the agent data model.
+CREATE TABLE IF NOT EXISTS decorations (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  pipeline_id UUID REFERENCES pipelines(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL,
+  position_x  FLOAT NOT NULL,
+  position_y  FLOAT NOT NULL,
+  created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS artifacts (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_step_id  UUID REFERENCES run_steps(id) ON DELETE CASCADE,
+  type         TEXT NOT NULL,  -- text | image | video | file
+  content      TEXT,           -- for text artifacts
+  file_path    TEXT,           -- for binary artifacts
+  created_at   TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_stations_pipeline   ON stations(pipeline_id);
+CREATE INDEX IF NOT EXISTS idx_connections_pipeline ON connections(pipeline_id);
+CREATE INDEX IF NOT EXISTS idx_runs_pipeline        ON runs(pipeline_id);
+CREATE INDEX IF NOT EXISTS idx_run_steps_run        ON run_steps(run_id);
+CREATE INDEX IF NOT EXISTS idx_artifacts_step       ON artifacts(run_step_id);
+CREATE INDEX IF NOT EXISTS idx_decorations_pipeline ON decorations(pipeline_id);

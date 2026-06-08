@@ -1,0 +1,23 @@
+{
+  "name": "agent-pipeline-builder-backend",
+  "version": "1.0.0",
+  "description": "Orchestration backend for the Agent Pipeline Builder",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "seed": "node src/seed.mjs",
+    "test:smoke": "node test/smoke.mjs",
+    "test:run": "MOCK_LLM=1 node test/run.mjs",
+    "test:decor": "node test/decor.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
+    "@electric-sql/pglite": "^0.2.17",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}

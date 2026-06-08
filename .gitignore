@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# embedded database (PGlite data)
+backend/data/
+
+# secrets / local env (keep the .example templates)
+.env
+*.local
+
+# logs & OS cruft
+*.log
+.DS_Store
+
+# local harness config
+.claude/
