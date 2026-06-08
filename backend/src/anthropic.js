@@ -3,9 +3,20 @@ import Anthropic from '@anthropic-ai/sdk';
 // Resolves ANTHROPIC_API_KEY from the environment.
 const client = new Anthropic();
 
-export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'claude-opus-4-8';
+// Haiku is the cheapest model — a sensible default for dev/testing. Pin a
+// per-station model (or set DEFAULT_MODEL) to Opus/Sonnet when you need heavier
+// reasoning. Use MOCK_LLM=1 for zero-cost logic/UI testing.
+export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'claude-haiku-4-5';
 
-// Pricing in USD per 1M tokens (input, output). Used to estimate per-step cost.
+// Models that support adaptive thinking. Haiku 4.5 does NOT — sending a
+// `thinking` block to it returns a 400, so we omit it for unsupported models.
+// (budget_tokens is removed on Opus 4.7/4.8 and deprecated elsewhere — adaptive
+// is the only correct on-mode; do not reintroduce budget_tokens.)
+const THINKING_MODELS = new Set([
+  'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6',
+]);
+
+// Pricing in USD per 1M tokens (input, output) — current Anthropic pricing.
 const PRICING = {
   'claude-opus-4-8': { input: 5, output: 25 },
   'claude-opus-4-7': { input: 5, output: 25 },
@@ -52,8 +63,9 @@ export async function runAgent({ system, input, model, onText }) {
 
   const stream = client.messages.stream({
     model: chosenModel,
-    max_tokens: 16000,
-    thinking: { type: 'adaptive' },
+    max_tokens: 8000,
+    // Adaptive thinking only on models that support it (omit for Haiku → would 400).
+    ...(THINKING_MODELS.has(chosenModel) ? { thinking: { type: 'adaptive' } } : {}),
     ...(system ? { system } : {}),
     messages: [{ role: 'user', content: input || '(no upstream input)' }],
   });

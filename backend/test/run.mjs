@@ -69,6 +69,11 @@ async function main() {
   const runId = runRes.body.id;
   console.log('✓ run started', runId);
 
+  // Concurrency guard: a second run while one is active must be rejected (409).
+  const dup = await req('POST', `/api/pipelines/${pid}/run`, { input: 'again' });
+  assert(dup.status === 409, 'concurrent run rejected (got ' + dup.status + ')');
+  console.log('✓ concurrent run rejected (409)');
+
   await done;
   ws.close();
 

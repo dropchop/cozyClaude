@@ -6,8 +6,11 @@ import { DEFAULT_MODEL } from '../anthropic.js';
 export const api = express.Router();
 
 const wrap = (fn) => (req, res) => fn(req, res).catch((err) => {
-  console.error(err);
-  res.status(err.status || 500).json({ error: String(err.message || err) });
+  const status = err.status || 500;
+  // Only log unexpected (5xx) failures; expected 4xx (e.g. the 409 concurrency
+  // guard, 404s) are normal control flow and would just be log noise.
+  if (status >= 500) console.error(err);
+  res.status(status).json({ error: String(err.message || err) });
 });
 
 // ---- Health & meta -------------------------------------------------------

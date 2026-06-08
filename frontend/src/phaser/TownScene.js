@@ -122,7 +122,10 @@ export class TownScene extends Phaser.Scene {
       }
       if (this.drag) {
         if (!this.drag.moved && Phaser.Math.Distance.Between(this.drag.startX, this.drag.startY, p.worldX, p.worldY) > DRAG_THRESHOLD) this.drag.moved = true;
-        if (this.drag.moved) this.moveDragged(p.worldX + this.drag.dx, p.worldY + this.drag.dy);
+        if (this.drag.moved) {
+          this.moveDragged(p.worldX + this.drag.dx, p.worldY + this.drag.dy);
+          if (this.drag.kind === 'house') this.trackShake(p.worldX);
+        }
         return;
       }
       if (this.dragging) {
@@ -190,6 +193,40 @@ export class TownScene extends Phaser.Scene {
       img.setPosition(x, y).setDepth(GROUND.has(img.getData('kind') || '') ? DEPTH.ground : objectDepth(y + img.height * SCALE));
     }
     this.updateSelGfx();
+  }
+
+  // Shake a dragged house left-right rapidly to pop off all its tubes.
+  trackShake(x) {
+    const d = this.drag;
+    const dx = x - (d.lastX ?? x);
+    d.lastX = x;
+    if (Math.abs(dx) < 4) return; // ignore jitter
+    const dir = dx < 0 ? -1 : 1;
+    if (d.shakeDir && dir !== d.shakeDir) {
+      const now = Date.now();
+      d.shakeTimes = (d.shakeTimes || []).filter((t) => now - t < 600);
+      d.shakeTimes.push(now);
+      if (d.shakeTimes.length >= 4) {
+        // persist the (small) move, drop the connections, end the drag
+        const rec = this.houses.get(d.id);
+        if (rec) bus.emit('intent:moveNode', { type: 'station', id: d.id, x: rec.container.x, y: rec.container.y });
+        this.disconnectHouse(d.id);
+        this.drag = null;
+      }
+    }
+    d.shakeDir = dir;
+  }
+
+  disconnectHouse(id) {
+    const gone = this.data.connections.filter((c) => c.from_station_id === id || c.to_station_id === id);
+    if (!gone.length) return;
+    gone.forEach((c) => bus.emit('intent:deleteConn', c.id));
+    this.data.connections = this.data.connections.filter((c) => c.from_station_id !== id && c.to_station_id !== id);
+    this.drawTubes();
+    this.rebuildNav();
+    const rec = this.houses.get(id);
+    if (rec) this.tweens.add({ targets: rec.container, scale: SCALE * 1.14, duration: 90, yoyo: true });
+    this.cameras.main.shake(180, 0.004);
   }
 
   // ---------- hit tests ----------

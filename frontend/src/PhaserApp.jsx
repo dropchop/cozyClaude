@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
 import { TownCanvas } from './TownCanvas.jsx';
 import { BuildPalette } from './BuildPalette.jsx';
@@ -18,6 +18,7 @@ export default function PhaserApp() {
   const [input, setInput] = useState('Write a two-line poem about autumn.');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
+  const [ioTick, setIoTick] = useState(0); // nudge to recompute inspector I/O as a run streams
 
   const dataRef = useRef(null);
   const pidRef = useRef(null);
@@ -91,6 +92,7 @@ export default function PhaserApp() {
     if (event === 'run_step_update') {
       if (data.status === 'completed' && data.artifact) outputsRef.current[data.station_id] = data.artifact.content;
       bus.emit('house:status', { station_id: data.station_id, status: data.status, tokens_used: data.tokens_used, cost_usd: data.cost_usd });
+      setIoTick((t) => t + 1);
     } else if (event === 'run_update') {
       if (data.status === 'completed' || data.status === 'failed') {
         setRunning(false); bus.emit('run:active', false);
@@ -159,6 +161,22 @@ export default function PhaserApp() {
 
   const node = selected && { data: { name: selected.name, model: selected.model, style: selected.style, system_prompt: selected.system_prompt, output: outputsRef.current[selected.id] } };
 
+  // Upstream/downstream neighbors + the input/output text for the selected house,
+  // mirroring how the orchestrator assembles each station's input.
+  const io = useMemo(() => {
+    if (!selected || !dataRef.current) return null;
+    const { stations, connections } = dataRef.current;
+    const nameOf = (id) => stations.find((s) => s.id === id)?.name || '?';
+    const upstream = connections.filter((c) => c.to_station_id === selected.id).map((c) => c.from_station_id);
+    const downstream = connections.filter((c) => c.from_station_id === selected.id).map((c) => c.to_station_id);
+    const isRoot = upstream.length === 0;
+    const inputText = isRoot
+      ? input
+      : upstream.map((uid) => `=== Output from "${nameOf(uid)}" ===\n${outputsRef.current[uid] || ''}`).join('\n\n');
+    return { inputsFrom: upstream.map(nameOf), outputsTo: downstream.map(nameOf), isRoot, inputText, outputText: outputsRef.current[selected.id] || '' };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, ioTick, input]);
+
   return (
     <div className="app">
       <header className="topbar">
@@ -184,7 +202,7 @@ export default function PhaserApp() {
           )}
         </div>
         {selected && (
-          <Inspector key={selected.id} node={node} models={models} onSave={saveHouse} onDelete={deleteHouse}
+          <Inspector key={selected.id} node={node} models={models} io={io} onSave={saveHouse} onDelete={deleteHouse}
             onClose={() => { setSelected(null); bus.emit('deselect'); }} />
         )}
       </div>

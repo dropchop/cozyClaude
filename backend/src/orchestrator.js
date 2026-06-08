@@ -2,12 +2,26 @@ import { query, one } from './db.js';
 import { runAgent } from './anthropic.js';
 import { broadcast } from './ws.js';
 
+// One active run per pipeline — prevents an accidental double "Start the Day"
+// from firing two parallel pipeline runs.
+const activeRuns = new Set();
+// Cap a single station's bundled input — several upstream outputs can pile up.
+const MAX_INPUT_CHARS = Number(process.env.MAX_INPUT_CHARS) || 40000;
+// Abort a run once its cumulative estimated cost crosses this ceiling (USD).
+const MAX_RUN_COST_USD = Number(process.env.MAX_RUN_COST_USD) || 1.0;
+
 /**
  * Create a run record and kick off execution in the background.
  * Returns the run row immediately so the API can respond; all subsequent
  * progress is streamed to the UI over WebSocket.
  */
 export async function startRun(pipelineId, input = '') {
+  if (activeRuns.has(pipelineId)) {
+    const err = new Error('a run is already in progress for this neighborhood');
+    err.status = 409;
+    throw err;
+  }
+
   const pipeline = await one('SELECT * FROM pipelines WHERE id = $1', [pipelineId]);
   if (!pipeline) {
     const err = new Error('pipeline not found');
@@ -24,14 +38,22 @@ export async function startRun(pipelineId, input = '') {
 
   const connections = await query('SELECT * FROM connections WHERE pipeline_id = $1', [pipelineId]);
 
-  const run = await one(
-    `INSERT INTO runs (pipeline_id, status, input, started_at)
-     VALUES ($1, 'running', $2, now()) RETURNING *`,
-    [pipelineId, input]
-  );
+  activeRuns.add(pipelineId); // claim before any awaitable work that executeRun cleans up
+  let run;
+  try {
+    run = await one(
+      `INSERT INTO runs (pipeline_id, status, input, started_at)
+       VALUES ($1, 'running', $2, now()) RETURNING *`,
+      [pipelineId, input]
+    );
+  } catch (e) {
+    activeRuns.delete(pipelineId);
+    throw e;
+  }
   broadcast('run_update', { run_id: run.id, pipeline_id: pipelineId, status: 'running' });
 
-  // Execute without blocking the HTTP response.
+  // Execute without blocking the HTTP response. executeRun always frees the
+  // active-run lock in its finally block.
   executeRun(run, stations, connections, input).catch(async (err) => {
     console.error('run execution error:', err);
     await failRun(run.id, pipelineId, String(err.message || err));
@@ -42,6 +64,7 @@ export async function startRun(pipelineId, input = '') {
 
 async function executeRun(run, stations, connections, input) {
   const pipelineId = run.pipeline_id;
+  try {
 
   // Pre-create a pending run_step per station so the UI can render the grid.
   const stepByStation = {};
@@ -87,17 +110,22 @@ async function executeRun(run, stations, connections, input) {
 
   const stationById = Object.fromEntries(stations.map((s) => [s.id, s]));
   const outputByStation = {};
+  let totalCost = 0;
 
   for (const stationId of order) {
     const station = stationById[stationId];
     const step = stepByStation[stationId];
 
     const ups = upstream[stationId];
-    const stationInput = ups.length === 0
+    const rawInput = ups.length === 0
       ? input
       : ups
         .map((uid) => `=== Output from "${stationById[uid].name}" ===\n${outputByStation[uid] || ''}`)
         .join('\n\n');
+    // Cap input length so multi-upstream stations can't balloon the request.
+    const stationInput = rawInput.length > MAX_INPUT_CHARS
+      ? `${rawInput.slice(0, MAX_INPUT_CHARS)}\n\n[…truncated for length]`
+      : rawInput;
 
     await query(`UPDATE run_steps SET status = 'running', started_at = now() WHERE id = $1`, [step.id]);
     broadcast('run_step_update', {
@@ -143,16 +171,30 @@ async function executeRun(run, stations, connections, input) {
       tokens_used: result.tokens, cost_usd: result.cost,
       artifact: { id: artifact.id, type: 'text', content: result.text },
     });
+
+    // Stop the run if cumulative cost crosses the ceiling.
+    totalCost += result.cost || 0;
+    if (totalCost > MAX_RUN_COST_USD) {
+      await failRun(run.id, pipelineId, `run exceeded cost ceiling ($${MAX_RUN_COST_USD.toFixed(2)})`);
+      return;
+    }
   }
 
   await query(`UPDATE runs SET status = 'completed', finished_at = now() WHERE id = $1`, [run.id]);
   broadcast('run_update', { run_id: run.id, pipeline_id: pipelineId, status: 'completed' });
+  } finally {
+    activeRuns.delete(pipelineId);
+  }
 }
 
 async function failRun(runId, pipelineId, message) {
-  await query(
-    `UPDATE runs SET status = 'failed', error = $2, finished_at = now() WHERE id = $1`,
-    [runId, message]
-  );
-  broadcast('run_update', { run_id: runId, pipeline_id: pipelineId, status: 'failed', error: message });
+  try {
+    await query(
+      `UPDATE runs SET status = 'failed', error = $2, finished_at = now() WHERE id = $1`,
+      [runId, message]
+    );
+    broadcast('run_update', { run_id: runId, pipeline_id: pipelineId, status: 'failed', error: message });
+  } catch (e) {
+    console.error('failRun itself errored:', e);
+  }
 }

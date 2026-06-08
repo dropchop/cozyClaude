@@ -346,6 +346,11 @@ html, body, #root {
 .style-chip { font-family: var(--read); font-size: 15px; padding: 5px 10px; border: 2px solid var(--wood-dk); background: var(--cream); color: var(--ink); cursor: pointer; border-radius: 4px; text-transform: capitalize; }
 .style-chip--on { background: var(--green); color: #08260c; border-color: #2f6f2c; }
 .inspector__output { margin: 0; background: #3a2a18; color: #f3e8cc; padding: 10px; font-family: var(--read); font-size: 16px; line-height: 1.2; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow-y: auto; border: 3px solid var(--wood-darker); border-radius: 4px; }
+.io { border-top: 2px dashed var(--wood-dk); padding-top: 10px; }
+.io__names { font-family: var(--read); font-size: 16px; color: var(--ink); line-height: 1.2; }
+.io__toggle { align-self: flex-start; margin-top: 5px; font-family: var(--read); font-size: 14px; padding: 4px 8px; border: 2px solid var(--wood-dk); background: var(--cream); color: var(--ink); border-radius: 4px; cursor: pointer; }
+.io__toggle:hover { background: var(--panel-lt); }
+
 .inspector__actions { display: flex; gap: 8px; }
 .inspector__actions .btn { flex: 1; }
 
