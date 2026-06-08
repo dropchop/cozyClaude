@@ -226,7 +226,6 @@ export class TownScene extends Phaser.Scene {
     this.rebuildNav();
     const rec = this.houses.get(id);
     if (rec) this.tweens.add({ targets: rec.container, scale: SCALE * 1.14, duration: 90, yoyo: true });
-    this.cameras.main.shake(180, 0.004);
   }
 
   // ---------- hit tests ----------
