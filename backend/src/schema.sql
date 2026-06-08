@@ -76,6 +76,21 @@ CREATE TABLE IF NOT EXISTS artifacts (
   created_at   TIMESTAMPTZ DEFAULT now()
 );
 
+-- User-registered models beyond the built-in Anthropic set. Stations reference
+-- a row here by storing its UUID in stations.model; resolveModel() in the
+-- providers layer dispatches by `provider` and uses the price columns to bill.
+-- Secrets (API keys) are NOT stored here — they live in env vars per provider.
+CREATE TABLE IF NOT EXISTS custom_models (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  label               TEXT NOT NULL,
+  provider            TEXT NOT NULL,                -- 'anthropic'|'openai'|'google'|'openai-compatible'
+  model_id            TEXT NOT NULL,                -- actual model string sent to the provider
+  base_url            TEXT,                         -- only set for openai-compatible
+  input_price_per_m   NUMERIC NOT NULL DEFAULT 0,
+  output_price_per_m  NUMERIC NOT NULL DEFAULT 0,
+  created_at          TIMESTAMPTZ DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_stations_pipeline   ON stations(pipeline_id);
 CREATE INDEX IF NOT EXISTS idx_connections_pipeline ON connections(pipeline_id);
 CREATE INDEX IF NOT EXISTS idx_runs_pipeline        ON runs(pipeline_id);

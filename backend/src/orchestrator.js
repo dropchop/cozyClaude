@@ -1,14 +1,14 @@
 import { query, one } from './db.js';
-import { runAgent } from './anthropic.js';
+import { runAgent, resolveModel, DEFAULT_MODEL, maxOutputTokensForBudget } from './providers/index.js';
 import { broadcast } from './ws.js';
 
 // One active run per pipeline — prevents an accidental double "Start the Day"
 // from firing two parallel pipeline runs.
 const activeRuns = new Set();
-// Cap a single station's bundled input — several upstream outputs can pile up.
-const MAX_INPUT_CHARS = Number(process.env.MAX_INPUT_CHARS) || 40000;
-// Abort a run once its cumulative estimated cost crosses this ceiling (USD).
-const MAX_RUN_COST_USD = Number(process.env.MAX_RUN_COST_USD) || 1.0;
+// `??` (not `||`) so an operator can explicitly set the env var to 0 without
+// getting silently rewritten back to the default.
+const MAX_INPUT_CHARS = Number(process.env.MAX_INPUT_CHARS ?? 40000);
+const MAX_RUN_COST_USD = Number(process.env.MAX_RUN_COST_USD ?? 1.0);
 
 /**
  * Create a run record and kick off execution in the background.
@@ -16,50 +16,54 @@ const MAX_RUN_COST_USD = Number(process.env.MAX_RUN_COST_USD) || 1.0;
  * progress is streamed to the UI over WebSocket.
  */
 export async function startRun(pipelineId, input = '') {
+  // Claim the slot atomically. The previous shape (has → await DB → add) had
+  // a TOCTOU: two simultaneous POSTs both passed the `has` check before either
+  // reached `add`, so both kicked off parallel runs. `add` must come right
+  // after the check, with the rest of the work guarded by a try/catch that
+  // releases the slot if anything fails before executeRun owns it.
   if (activeRuns.has(pipelineId)) {
     const err = new Error('a run is already in progress for this neighborhood');
     err.status = 409;
     throw err;
   }
+  activeRuns.add(pipelineId);
 
-  const pipeline = await one('SELECT * FROM pipelines WHERE id = $1', [pipelineId]);
-  if (!pipeline) {
-    const err = new Error('pipeline not found');
-    err.status = 404;
-    throw err;
-  }
-
-  const stations = await query('SELECT * FROM stations WHERE pipeline_id = $1', [pipelineId]);
-  if (stations.length === 0) {
-    const err = new Error('pipeline has no stations');
-    err.status = 400;
-    throw err;
-  }
-
-  const connections = await query('SELECT * FROM connections WHERE pipeline_id = $1', [pipelineId]);
-
-  activeRuns.add(pipelineId); // claim before any awaitable work that executeRun cleans up
-  let run;
   try {
-    run = await one(
+    const pipeline = await one('SELECT * FROM pipelines WHERE id = $1', [pipelineId]);
+    if (!pipeline) {
+      const err = new Error('pipeline not found');
+      err.status = 404;
+      throw err;
+    }
+
+    const stations = await query('SELECT * FROM stations WHERE pipeline_id = $1', [pipelineId]);
+    if (stations.length === 0) {
+      const err = new Error('pipeline has no stations');
+      err.status = 400;
+      throw err;
+    }
+
+    const connections = await query('SELECT * FROM connections WHERE pipeline_id = $1', [pipelineId]);
+
+    const run = await one(
       `INSERT INTO runs (pipeline_id, status, input, started_at)
        VALUES ($1, 'running', $2, now()) RETURNING *`,
       [pipelineId, input]
     );
+    broadcast('run_update', { run_id: run.id, pipeline_id: pipelineId, status: 'running' });
+
+    // Execute without blocking the HTTP response. executeRun's own finally
+    // releases the active-run slot for the success path.
+    executeRun(run, stations, connections, input).catch(async (err) => {
+      console.error('run execution error:', err);
+      await failRun(run.id, pipelineId, String(err.message || err));
+    });
+
+    return run;
   } catch (e) {
     activeRuns.delete(pipelineId);
     throw e;
   }
-  broadcast('run_update', { run_id: run.id, pipeline_id: pipelineId, status: 'running' });
-
-  // Execute without blocking the HTTP response. executeRun always frees the
-  // active-run lock in its finally block.
-  executeRun(run, stations, connections, input).catch(async (err) => {
-    console.error('run execution error:', err);
-    await failRun(run.id, pipelineId, String(err.message || err));
-  });
-
-  return run;
 }
 
 async function executeRun(run, stations, connections, input) {
@@ -132,12 +136,37 @@ async function executeRun(run, stations, connections, input) {
       run_id: run.id, station_id: stationId, step_id: step.id, status: 'running',
     });
 
+    // Project worst-case cost BEFORE the call so one station can't blow past
+    // the run ceiling. Cap each call's max_tokens to whatever output budget
+    // remains at this model's price; if even the input alone would exceed the
+    // ceiling, fail the run before billing anything. resolveModel falls back
+    // to DEFAULT_MODEL automatically if the station's model field is missing
+    // or references a deleted custom model.
+    const modelRecord = (await resolveModel(station.model)) || (await resolveModel(DEFAULT_MODEL));
+    const approxInputTokens = Math.ceil(stationInput.length / 4);
+    const remaining = MAX_RUN_COST_USD - totalCost;
+    const budgetMaxTokens = maxOutputTokensForBudget(modelRecord, remaining, approxInputTokens);
+    if (budgetMaxTokens <= 0) {
+      const message = `run exceeded cost ceiling ($${MAX_RUN_COST_USD.toFixed(2)})`;
+      await query(
+        `UPDATE run_steps SET status = 'failed', error = $2, finished_at = now() WHERE id = $1`,
+        [step.id, message]
+      );
+      broadcast('run_step_update', {
+        run_id: run.id, station_id: stationId, step_id: step.id, status: 'failed', error: message,
+      });
+      await failRun(run.id, pipelineId, message);
+      return;
+    }
+    const perCallMaxTokens = Math.min(modelRecord.defaultMaxTokens, budgetMaxTokens);
+
     let result;
     try {
       result = await runAgent({
         system: station.system_prompt,
         input: stationInput,
         model: station.model,
+        maxTokens: perCallMaxTokens,
         onText: (delta) => broadcast('run_step_token', {
           run_id: run.id, station_id: stationId, step_id: step.id, delta,
         }),
