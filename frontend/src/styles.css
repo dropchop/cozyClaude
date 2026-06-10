@@ -330,6 +330,7 @@ html, body, #root {
   display: flex; flex-direction: column; gap: 12px;
   padding: 14px; overflow-y: auto; z-index: 9; color: var(--ink);
   box-shadow: -4px 0 0 var(--shadow);
+  position: relative; /* anchor the add-model dialog overlay to this panel */
 }
 .inspector__head { display: flex; align-items: center; justify-content: space-between; }
 .inspector__head h3 { margin: 0; font-family: var(--pixel); font-size: 12px; color: var(--wood-dk); text-shadow: 1px 1px 0 rgba(255,255,255,0.5); }
@@ -346,8 +347,48 @@ html, body, #root {
 .style-chip { font-family: var(--read); font-size: 15px; padding: 5px 10px; border: 2px solid var(--wood-dk); background: var(--cream); color: var(--ink); cursor: pointer; border-radius: 4px; text-transform: capitalize; }
 .style-chip--on { background: var(--green); color: #08260c; border-color: #2f6f2c; }
 .inspector__output { margin: 0; background: #3a2a18; color: #f3e8cc; padding: 10px; font-family: var(--read); font-size: 16px; line-height: 1.2; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow-y: auto; border: 3px solid var(--wood-darker); border-radius: 4px; }
+.io { border-top: 2px dashed var(--wood-dk); padding-top: 10px; }
+.io__names { font-family: var(--read); font-size: 16px; color: var(--ink); line-height: 1.2; }
+.io__toggle { align-self: flex-start; margin-top: 5px; font-family: var(--read); font-size: 14px; padding: 4px 8px; border: 2px solid var(--wood-dk); background: var(--cream); color: var(--ink); border-radius: 4px; cursor: pointer; }
+.io__toggle:hover { background: var(--panel-lt); }
+
 .inspector__actions { display: flex; gap: 8px; }
 .inspector__actions .btn { flex: 1; }
+
+/* ---------- model dropdown + "+" affordance ---------- */
+.model-row { display: flex; gap: 6px; align-items: stretch; }
+.model-row select { flex: 1; }
+.add-model-btn {
+  font-family: var(--read); font-size: 18px; line-height: 1;
+  width: 38px; padding: 0;
+  border: 3px solid var(--wood-dk); background: var(--cream); color: var(--ink);
+  border-radius: 4px; cursor: pointer;
+  box-shadow: inset 2px 2px 0 rgba(124,79,37,0.15);
+}
+.add-model-btn:hover { background: var(--panel-lt); }
+
+/* ---------- add-model dialog (in-page overlay, not a window) ---------- */
+.add-model-dialog__backdrop {
+  position: absolute; inset: 0; z-index: 50;
+  background: rgba(40, 22, 8, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.add-model-dialog {
+  width: min(420px, 100%);
+  background: var(--panel); border: 5px solid var(--wood-darker); border-radius: 6px;
+  box-shadow: 6px 6px 0 var(--shadow);
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 14px 16px;
+  max-height: calc(100% - 20px); overflow-y: auto;
+}
+.add-model-dialog__head { display: flex; justify-content: space-between; align-items: center; }
+.add-model-dialog__head h4 { margin: 0; font-family: var(--head); font-size: 16px; color: var(--ink); }
+.add-model-dialog__prices { display: flex; gap: 10px; }
+.add-model-dialog__prices .field { flex: 1; }
+.add-model-dialog__error { color: #b03020; font-family: var(--read); font-size: 14px; }
+.add-model-dialog__actions { display: flex; gap: 8px; margin-top: 4px; }
+.add-model-dialog__actions .btn { flex: 1; }
 
 /* ---------- run bar ---------- */
 .runbar { display: flex; gap: 12px; align-items: stretch; padding: 12px 14px; border-top: 5px solid var(--wood-dk); box-shadow: 0 -4px 0 var(--shadow); }

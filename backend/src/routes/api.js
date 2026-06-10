@@ -1,27 +1,58 @@
 import express from 'express';
 import { query, one } from '../db.js';
 import { startRun } from '../orchestrator.js';
-import { DEFAULT_MODEL } from '../anthropic.js';
+import { DEFAULT_MODEL, builtinModelIds } from '../providers/index.js';
+
+const ALLOWED_PROVIDERS = ['anthropic', 'openai', 'google', 'openai-compatible'];
 
 export const api = express.Router();
 
 const wrap = (fn) => (req, res) => fn(req, res).catch((err) => {
-  console.error(err);
-  res.status(err.status || 500).json({ error: String(err.message || err) });
+  const status = err.status || 500;
+  // Only log unexpected (5xx) failures; expected 4xx (e.g. the 409 concurrency
+  // guard, 404s) are normal control flow and would just be log noise.
+  if (status >= 500) console.error(err);
+  res.status(status).json({ error: String(err.message || err) });
 });
 
 // ---- Health & meta -------------------------------------------------------
 
 api.get('/health', (_req, res) => res.json({ ok: true }));
 
-api.get('/models', (_req, res) => res.json({
-  default: DEFAULT_MODEL,
-  models: [
-    'claude-opus-4-8',
-    'claude-opus-4-7',
-    'claude-sonnet-4-6',
-    'claude-haiku-4-5',
-  ],
+api.get('/models', wrap(async (_req, res) => {
+  const custom = await query('SELECT * FROM custom_models ORDER BY created_at DESC');
+  const builtin = builtinModelIds();
+  res.json({
+    default: DEFAULT_MODEL,
+    builtin,
+    custom,
+    // Back-compat: callers that read `models.models` still get a flat list of
+    // every selectable identifier (built-in name OR custom_models.id).
+    models: [...builtin, ...custom.map((c) => c.id)],
+  });
+}));
+
+// ---- Custom model registry --------------------------------------------------
+
+api.post('/models', wrap(async (req, res) => {
+  const { label, provider, model_id, base_url, input_price_per_m, output_price_per_m } = req.body || {};
+  if (!label || !provider || !model_id) {
+    return res.status(400).json({ error: 'label, provider, and model_id are required' });
+  }
+  if (!ALLOWED_PROVIDERS.includes(provider)) {
+    return res.status(400).json({ error: `provider must be one of: ${ALLOWED_PROVIDERS.join(', ')}` });
+  }
+  const row = await one(
+    `INSERT INTO custom_models (label, provider, model_id, base_url, input_price_per_m, output_price_per_m)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [label, provider, model_id, base_url || null, Number(input_price_per_m) || 0, Number(output_price_per_m) || 0]
+  );
+  res.status(201).json(row);
+}));
+
+api.delete('/models/:id', wrap(async (req, res) => {
+  await query('DELETE FROM custom_models WHERE id = $1', [req.params.id]);
+  res.status(204).end();
 }));
 
 // ---- Pipelines -----------------------------------------------------------

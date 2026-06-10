@@ -69,6 +69,11 @@ async function main() {
   const runId = runRes.body.id;
   console.log('✓ run started', runId);
 
+  // Concurrency guard: a second run while one is active must be rejected (409).
+  const dup = await req('POST', `/api/pipelines/${pid}/run`, { input: 'again' });
+  assert(dup.status === 409, 'concurrent run rejected (got ' + dup.status + ')');
+  console.log('✓ concurrent run rejected (409)');
+
   await done;
   ws.close();
 
@@ -107,6 +112,76 @@ async function main() {
   const cChars = Number(cContent.match(/processed (\d+) chars/)?.[1] || 0);
   assert(cChars > 0, 'C received upstream input (processed ' + cChars + ' chars)');
   console.log('✓ C consumed upstream output (' + cChars + ' chars); total tokens =', total);
+
+  // --- Concurrency race test: two truly parallel POSTs on a fresh pipeline.
+  // The earlier sequential check at line ~73 doesn't exercise the TOCTOU
+  // window between activeRuns.has() and activeRuns.add(); this one does.
+  const racePid = (await req('POST', '/api/pipelines', { name: 'Race test' })).body.id;
+  await mkStation(racePid, 'solo', 0);
+  const [r1, r2] = await Promise.all([
+    req('POST', `/api/pipelines/${racePid}/run`, { input: 'race' }),
+    req('POST', `/api/pipelines/${racePid}/run`, { input: 'race' }),
+  ]);
+  const statuses = [r1.status, r2.status].sort();
+  assert(statuses[0] === 202 && statuses[1] === 409,
+    'parallel runs: exactly one 202, one 409 (got ' + statuses.join(',') + ')');
+  console.log('✓ parallel POST /run: one 202, one 409 (atomic lock)');
+
+  // --- Model registry: custom model end-to-end through resolveModel + MOCK_LLM.
+  const customModel = (await req('POST', '/api/models', {
+    label: 'Test Haiku alias',
+    provider: 'anthropic',
+    model_id: 'claude-haiku-4-5',
+    input_price_per_m: 1,
+    output_price_per_m: 5,
+  })).body;
+  assert(customModel.id, 'custom model created');
+  console.log('✓ custom model registered:', customModel.id);
+
+  const modelList = (await req('GET', '/api/models')).body;
+  assert(Array.isArray(modelList.builtin) && modelList.builtin.length >= 4, 'builtin models listed');
+  assert(modelList.custom.some((c) => c.id === customModel.id), 'custom model in list');
+  console.log('✓ GET /api/models groups builtin + custom');
+
+  // Assign the custom model UUID to a station on a new pipeline and run it —
+  // exercises resolveModel's UUID branch via MOCK_LLM (no real API call).
+  const mPid = (await req('POST', '/api/pipelines', { name: 'Custom model test' })).body.id;
+  const mStation = (await req('POST', `/api/pipelines/${mPid}/stations`, {
+    name: 'CustomModelStation', system_prompt: 'echo', position_x: 0, position_y: 0,
+    model: customModel.id,
+  })).body.id;
+  assert(mStation, 'station created with custom model UUID');
+
+  const mEvents = [];
+  const ws2 = new WebSocket(`ws://localhost:${PORT}/ws`);
+  ws2.on('message', (raw) => mEvents.push(JSON.parse(raw.toString())));
+  await new Promise((r) => ws2.on('open', r));
+  const mRun = await req('POST', `/api/pipelines/${mPid}/run`, { input: 'hello' });
+  assert(mRun.status === 202, 'custom-model run started');
+  const mRunId = mRun.body.id;
+  // Filter by run_id — earlier pipelines on the same server also broadcast
+  // run_update / run_step_update events on this socket.
+  await new Promise((resolve) => {
+    const check = () => {
+      if (mEvents.some((e) => e.event === 'run_update' && e.data.run_id === mRunId
+          && (e.data.status === 'completed' || e.data.status === 'failed'))) resolve();
+      else setTimeout(check, 20);
+    };
+    check();
+  });
+  ws2.close();
+  const mCompleted = mEvents.filter((e) => e.event === 'run_step_update'
+    && e.data.run_id === mRunId && e.data.status === 'completed');
+  assert(mCompleted.length === 1, 'custom-model station completed (got ' + mCompleted.length + ')');
+  const content = mCompleted[0].data.artifact?.content || '';
+  assert(content.includes('[mock:claude-haiku-4-5]'),
+    'mock dispatched to resolved modelId from custom_models row (got: ' + content.slice(0, 80) + ')');
+  console.log('✓ resolveModel(UUID) routed to custom_models.model_id');
+
+  // Clean up the custom model and confirm the station falls back to default.
+  const del = await req('DELETE', `/api/models/${customModel.id}`);
+  assert(del.status === 204, 'custom model deleted');
+  console.log('✓ DELETE /api/models/:id works');
 
   server.close();
   console.log('\nALL ORCHESTRATION TESTS PASSED');
