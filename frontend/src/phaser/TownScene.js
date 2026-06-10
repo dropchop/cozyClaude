@@ -6,6 +6,8 @@ import { GROUND, LINE_KINDS, lineCells, worldToTile, tileTopLeft, snap } from '.
 import { buildNav, findPath, pickTarget, randomSpawn } from './pathfinding.js';
 
 const N_VILLAGERS = 8;
+// cap A* grid-clone calls per frame so synchronized re-targets can't hitch
+const MAX_PATHS_PER_FRAME = 2;
 const MIN_ZOOM = 0.35;
 const MAX_ZOOM = 3;
 const BULLDOZE = 'bulldoze';
@@ -43,22 +45,28 @@ export class TownScene extends Phaser.Scene {
     this.previewCells = [];
     this.nav = null;
     this.villagers = [];
+    this._navDirty = false;
+    this._tmpVec = new Phaser.Math.Vector2();
+    this._aheadVec = new Phaser.Math.Vector2();
 
     this.setupInput();
     this.setupVillagers();
 
-    bus.on('load', (d) => this.renderData(d));
-    bus.on('build:mode', (v) => { this.buildMode = v; this.gridSprite.setVisible(v); });
-    bus.on('build:brush', (v) => { this.brush = v; });
-    bus.on('build:lineMode', (v) => { this.lineMode = v; });
-    bus.on('decor:added', (row) => this.addDecor(row, true));
-    bus.on('decor:addedMany', (rows) => rows.forEach((r) => this.addDecor(r, true)));
-    bus.on('conn:added', (row) => { this.data.connections.push(row); this.drawTubes(); });
-    bus.on('house:updated', (s) => this.updateHouse(s));
-    bus.on('house:removed', (id) => this.removeHouse(id));
-    bus.on('house:status', (d) => this.applyHouseStatus(d));
-    bus.on('run:active', (v) => { this.runActive = v; this.tubes.forEach((t) => t.carrier.setVisible(v)); });
-    bus.on('deselect', () => this.deselect());
+    const busOffs = [
+      bus.on('load', (d) => this.renderData(d)),
+      bus.on('build:mode', (v) => { this.buildMode = v; this.gridSprite.setVisible(v); }),
+      bus.on('build:brush', (v) => { this.brush = v; }),
+      bus.on('build:lineMode', (v) => { this.lineMode = v; }),
+      bus.on('decor:added', (row) => this.addDecor(row, true)),
+      bus.on('decor:addedMany', (rows) => { rows.forEach((r) => this.addDecor(r, false)); this.data.decorations.push(...rows); this.rebuildNav(); }),
+      bus.on('conn:added', (row) => { this.data.connections.push(row); this.drawTubes(); }),
+      bus.on('house:updated', (s) => this.updateHouse(s)),
+      bus.on('house:removed', (id) => this.removeHouse(id)),
+      bus.on('house:status', (d) => this.applyHouseStatus(d)),
+      bus.on('run:active', (v) => { this.runActive = v; this.tubes.forEach((t) => t.carrier.setVisible(v)); }),
+      bus.on('deselect', () => this.deselect()),
+    ];
+    this.events.once('shutdown', () => busOffs.forEach((off) => off()));
 
     bus.emit('scene:ready');
   }
@@ -166,6 +174,7 @@ export class TownScene extends Phaser.Scene {
         const conn = this.tubeUnder(p.worldX, p.worldY);
         if (conn) this.select('tube', conn.id); else this.deselect();
       }
+      if (this._navDirty) { this.rebuildNav(); this._navDirty = false; }
       this.painting = false; this.dragging = false; this.lineStart = null;
       this.previewCells = []; this.previewGfx.clear();
     };
@@ -331,7 +340,7 @@ export class TownScene extends Phaser.Scene {
         bus.emit('intent:deleteDecor', id);
         img.destroy(); this.decor.delete(id);
         this.data.decorations = this.data.decorations.filter((d) => d.id !== id);
-        this.rebuildNav();
+        this._navDirty = true; // rebuilt once when the stroke ends (pointerup)
       }
     }
   }
@@ -421,8 +430,12 @@ export class TownScene extends Phaser.Scene {
 
   drawTubes() {
     const g = this.tubeGfx; g.clear();
-    this.tubes.forEach((t) => t.carrier.destroy());
-    this.tubes = [];
+
+    // Build updated curve data without destroying carriers.
+    // Carriers are long-lived images keyed by conn.id — only created/destroyed
+    // when connections are added or removed, not on every redraw during drag.
+    const newTubes = [];
+    const seen = new Set();
     for (const conn of this.data.connections) {
       const from = this.data.stations.find((s) => s.id === conn.from_station_id);
       const to = this.data.stations.find((s) => s.id === conn.to_station_id);
@@ -436,9 +449,20 @@ export class TownScene extends Phaser.Scene {
       g.lineStyle(7, 0xcdeaf3, 0.55); curve.draw(g, 48);
       g.lineStyle(2, 0xffffff, 0.4); curve.draw(g, 48);
       g.fillStyle(0x8a5a2c, 1); g.fillCircle(a.x, a.y, 4); g.fillCircle(b.x, b.y, 4);
-      const carrier = this.add.image(a.x, a.y, 'carrier').setDepth(DEPTH.tube + 1).setVisible(this.runActive);
-      this.tubes.push({ conn, curve, carrier, t: Math.random() });
+
+      // Reuse existing carrier if present; create only when connection is new.
+      const existing = this.tubes.find((t) => t.conn.id === conn.id);
+      const carrier = existing
+        ? existing.carrier
+        : this.add.image(a.x, a.y, 'carrier').setDepth(DEPTH.tube + 1);
+      carrier.setVisible(this.runActive);
+      seen.add(conn.id);
+      newTubes.push({ conn, curve, carrier, t: existing ? existing.t : Math.random() });
     }
+
+    // Destroy carriers for connections that no longer exist.
+    this.tubes.forEach((t) => { if (!seen.has(t.conn.id)) t.carrier.destroy(); });
+    this.tubes = newTubes;
   }
 
   fitCamera() {
@@ -467,10 +491,14 @@ export class TownScene extends Phaser.Scene {
   updateVillagers(delta) {
     if (!this.nav) { this.villagers.forEach((v) => v.spr.setVisible(false)); return; }
     const dt = delta / 1000;
+    let pathsThisFrame = 0;
     for (const v of this.villagers) {
       if (!v.spr.visible) { const sp = randomSpawn(this.nav); if (!sp) continue; v.spr.setPosition(sp.x, sp.y).setVisible(true); }
       if (v.pause > 0) { v.pause -= dt; if (v.spr.anims.isPlaying) v.spr.anims.stop(); continue; }
       if (v.idx >= v.path.length) {
+        // defer to next frame if we've already hit the per-frame A* budget
+        if (pathsThisFrame >= MAX_PATHS_PER_FRAME) { v.pause = 0; continue; }
+        pathsThisFrame += 1;
         const tgt = pickTarget(this.nav);
         const path = tgt && findPath(this.nav, { x: v.spr.x, y: v.spr.y }, tgt);
         if (path && path.length) { v.path = path; v.idx = 0; } else { v.pause = 0.3 + Math.random() * 0.4; continue; }
@@ -481,7 +509,8 @@ export class TownScene extends Phaser.Scene {
       const step = Math.min(d, v.speed * dt);
       v.spr.x += (dx / d) * step; v.spr.y += (dy / d) * step;
       if (Math.abs(dx) > 0.5) { v.facing = dx < 0 ? -1 : 1; v.spr.setFlipX(v.facing < 0); }
-      v.spr.setDepth(objectDepth(v.spr.y));
+      const depth = objectDepth(v.spr.y);
+      if (depth !== v.lastDepth) { v.spr.setDepth(depth); v.lastDepth = depth; }
       if (!v.spr.anims.isPlaying) v.spr.play(`walk-${v.vi}`);
     }
   }
@@ -490,13 +519,12 @@ export class TownScene extends Phaser.Scene {
     this.updateVillagers(delta);
     if (!this.runActive) return;
     const step = delta / 1400;
-    const tmp = new Phaser.Math.Vector2();
     for (const tube of this.tubes) {
       tube.t = (tube.t + step) % 1;
-      tube.curve.getPoint(tube.t, tmp);
-      tube.carrier.setPosition(tmp.x, tmp.y);
-      const ahead = tube.curve.getPoint(Math.min(1, tube.t + 0.02));
-      tube.carrier.setRotation(Phaser.Math.Angle.Between(tmp.x, tmp.y, ahead.x, ahead.y));
+      tube.curve.getPoint(tube.t, this._tmpVec);
+      tube.carrier.setPosition(this._tmpVec.x, this._tmpVec.y);
+      tube.curve.getPoint(Math.min(1, tube.t + 0.02), this._aheadVec);
+      tube.carrier.setRotation(Phaser.Math.Angle.Between(this._tmpVec.x, this._tmpVec.y, this._aheadVec.x, this._aheadVec.y));
     }
   }
 }
