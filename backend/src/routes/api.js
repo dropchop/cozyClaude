@@ -1,7 +1,7 @@
 import express from 'express';
 import { query, one } from '../db.js';
 import { startRun } from '../orchestrator.js';
-import { DEFAULT_MODEL, builtinModelIds } from '../providers/index.js';
+import { DEFAULT_MODEL, builtinModelList } from '../providers/index.js';
 
 const ALLOWED_PROVIDERS = ['anthropic', 'openai', 'google', 'openai-compatible'];
 
@@ -21,14 +21,14 @@ api.get('/health', (_req, res) => res.json({ ok: true }));
 
 api.get('/models', wrap(async (_req, res) => {
   const custom = await query('SELECT * FROM custom_models ORDER BY created_at DESC');
-  const builtin = builtinModelIds();
+  const builtin = builtinModelList(); // [{ id, input, output }]
   res.json({
     default: DEFAULT_MODEL,
     builtin,
     custom,
     // Back-compat: callers that read `models.models` still get a flat list of
     // every selectable identifier (built-in name OR custom_models.id).
-    models: [...builtin, ...custom.map((c) => c.id)],
+    models: [...builtin.map((b) => b.id), ...custom.map((c) => c.id)],
   });
 }));
 

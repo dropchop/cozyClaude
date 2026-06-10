@@ -390,6 +390,14 @@ html, body, #root {
 .add-model-dialog__actions { display: flex; gap: 8px; margin-top: 4px; }
 .add-model-dialog__actions .btn { flex: 1; }
 
+/* existing custom models, manageable from the same dialog */
+.add-model-dialog__list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; border-top: 2px dashed var(--wood-dk); padding-top: 10px; }
+.add-model-dialog__list-title { font-family: var(--read); font-size: 14px; color: var(--wood-dk); }
+.model-list-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.model-list-row__name { font-family: var(--read); font-size: 15px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-delete { flex-shrink: 0; font-size: 15px; line-height: 1; padding: 4px 8px; border: 2px solid var(--wood-dk); background: var(--cream); color: var(--ink); border-radius: 4px; cursor: pointer; }
+.model-delete:hover { background: #f6d4cc; border-color: #b03020; }
+
 /* ---------- run bar ---------- */
 .runbar { display: flex; gap: 12px; align-items: stretch; padding: 12px 14px; border-top: 5px solid var(--wood-dk); box-shadow: 0 -4px 0 var(--shadow); }
 .run-input { flex: 1; font-family: var(--read); font-size: 18px; resize: none; padding: 10px; border: 3px solid var(--wood-dk); background: var(--cream); color: var(--ink); border-radius: 4px; box-shadow: inset 2px 2px 0 rgba(124,79,37,0.15); }

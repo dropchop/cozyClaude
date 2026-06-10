@@ -214,7 +214,7 @@ export default function PhaserApp() {
         </div>
         {selected && (
           <Inspector key={selected.id} node={node} models={models} io={io}
-            onSave={saveHouse} onDelete={deleteHouse} onModelCreated={refetchModels}
+            onSave={saveHouse} onDelete={deleteHouse} onModelsChanged={refetchModels}
             onClose={() => { setSelected(null); bus.emit('deselect'); }} />
         )}
       </div>

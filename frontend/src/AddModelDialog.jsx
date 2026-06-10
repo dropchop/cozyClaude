@@ -8,10 +8,12 @@ const PROVIDERS = [
   { value: 'openai-compatible',  label: 'OpenAI-compatible',  needsBaseUrl: true,  idHint: 'llama3.1' },
 ];
 
-// Overlay form shown by the Inspector when the user clicks "+" next to the
-// model dropdown. Posts a row to /api/models, then calls back so the parent
-// can refetch the model list and auto-select the new row for this station.
-export function AddModelDialog({ onCreated, onClose }) {
+// Overlay shown by the Inspector when the user clicks "＋" next to the model
+// dropdown. Registers a model via POST /api/models, and doubles as a manager:
+// the `custom` list below the form can be deleted via DELETE /api/models/:id.
+// `onCreated(row)` and `onDeleted(id)` let the parent refetch + reconcile the
+// selection.
+export function AddModelDialog({ onCreated, onClose, custom = [], onDeleted }) {
   const [provider, setProvider] = useState('anthropic');
   const [label, setLabel] = useState('');
   const [modelId, setModelId] = useState('');
@@ -41,6 +43,18 @@ export function AddModelDialog({ onCreated, onClose }) {
       setError(err.message || String(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function remove(c) {
+    // Deleting a model silently changes every station that uses it, so confirm.
+    if (!window.confirm(`Delete model "${c.label}"? Houses using it fall back to the default model.`)) return;
+    setError(null);
+    try {
+      await api.deleteModel(c.id);
+      onDeleted?.(c.id);
+    } catch (err) {
+      setError(err.message || String(err));
     }
   }
 
@@ -95,6 +109,18 @@ export function AddModelDialog({ onCreated, onClose }) {
           </button>
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
         </div>
+
+        {custom.length > 0 && (
+          <div className="add-model-dialog__list">
+            <span className="add-model-dialog__list-title">Your custom models</span>
+            {custom.map((c) => (
+              <div key={c.id} className="model-list-row">
+                <span className="model-list-row__name">{c.label} · {c.provider}</span>
+                <button type="button" className="model-delete" title="Delete model" onClick={() => remove(c)}>🗑</button>
+              </div>
+            ))}
+          </div>
+        )}
       </form>
     </div>
   );
