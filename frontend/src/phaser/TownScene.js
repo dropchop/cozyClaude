@@ -195,23 +195,38 @@ export class TownScene extends Phaser.Scene {
     this.updateSelGfx();
   }
 
-  // Shake a dragged house left-right rapidly to pop off all its tubes.
+  // Shake a dragged house left-right rapidly to pop off all its tubes. A
+  // reversal only counts when the swing since the last reversal traversed
+  // enough distance (SHAKE_AMPLITUDE) — without this, a wobbly cursor during
+  // a normal repositioning drag could trigger an accidental disconnect.
   trackShake(x) {
+    const SHAKE_AMPLITUDE = 40;
+    const SHAKE_WINDOW_MS = 600;
+    const SHAKE_REVERSALS = 4;
+
     const d = this.drag;
     const dx = x - (d.lastX ?? x);
     d.lastX = x;
     if (Math.abs(dx) < 4) return; // ignore jitter
     const dir = dx < 0 ? -1 : 1;
     if (d.shakeDir && dir !== d.shakeDir) {
+      const reversalX = d.lastReversalX ?? x;
+      if (Math.abs(x - reversalX) < SHAKE_AMPLITUDE) {
+        // Direction flipped but the swing was tiny — treat as a wobble, not a shake.
+        d.shakeDir = dir;
+        return;
+      }
       const now = Date.now();
-      d.shakeTimes = (d.shakeTimes || []).filter((t) => now - t < 600);
+      d.shakeTimes = (d.shakeTimes || []).filter((t) => now - t < SHAKE_WINDOW_MS);
       d.shakeTimes.push(now);
-      if (d.shakeTimes.length >= 4) {
-        // persist the (small) move, drop the connections, end the drag
+      d.lastReversalX = x;
+      if (d.shakeTimes.length >= SHAKE_REVERSALS) {
+        // Persist the (small) move, drop the connections, end the drag.
         const rec = this.houses.get(d.id);
         if (rec) bus.emit('intent:moveNode', { type: 'station', id: d.id, x: rec.container.x, y: rec.container.y });
         this.disconnectHouse(d.id);
         this.drag = null;
+        return;
       }
     }
     d.shakeDir = dir;

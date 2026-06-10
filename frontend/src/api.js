@@ -21,6 +21,8 @@ export const api = {
   deletePipeline: (id) => http('DELETE', `/api/pipelines/${id}`),
 
   models: () => http('GET', '/api/models'),
+  createModel: (model) => http('POST', '/api/models', model),
+  deleteModel: (id) => http('DELETE', `/api/models/${id}`),
 
   addStation: (pid, station) => http('POST', `/api/pipelines/${pid}/stations`, station),
   updateStation: (id, patch) => http('PATCH', `/api/stations/${id}`, patch),

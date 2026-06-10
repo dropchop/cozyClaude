@@ -26,10 +26,14 @@ export default function PhaserApp() {
   pidRef.current = pipelineId;
 
   // ---- load ----
-  useEffect(() => {
+  const refetchModels = useCallback(() => {
     api.models().then(setModels).catch(() => {});
-    api.listPipelines().then((list) => { setPipelines(list); if (list.length) setPipelineId((c) => c || list[0].id); }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    refetchModels();
+    api.listPipelines().then((list) => { setPipelines(list); if (list.length) setPipelineId((c) => c || list[0].id); }).catch(() => {});
+  }, [refetchModels]);
 
   const loadPipeline = useCallback((id) => {
     if (!id) return;
@@ -63,11 +67,17 @@ export default function PhaserApp() {
         else api.updateStation(id, { position_x: x, position_y: y }).catch(fail);
       }),
       bus.on('intent:connect', async ({ from, to }) => {
-        try { const r = await api.addConnection(pidRef.current, from, to); dataRef.current?.connections.push(r); bus.emit('conn:added', r); } catch (e) { fail(e); }
+        try {
+          const r = await api.addConnection(pidRef.current, from, to);
+          dataRef.current?.connections.push(r);
+          bus.emit('conn:added', r);
+          setIoTick((t) => t + 1); // refresh Inspector I/O panel
+        } catch (e) { fail(e); }
       }),
       bus.on('intent:deleteConn', (id) => {
         if (dataRef.current) dataRef.current.connections = dataRef.current.connections.filter((c) => c.id !== id);
         api.deleteConnection(id).catch(fail);
+        setIoTick((t) => t + 1);
       }),
       bus.on('intent:deleteHouse', async (id) => {
         try {
@@ -78,6 +88,7 @@ export default function PhaserApp() {
           }
           bus.emit('house:removed', id);
           setSelected((cur) => (cur?.id === id ? null : cur));
+          setIoTick((t) => t + 1);
         } catch (e) { fail(e); }
       }),
       bus.on('select:house', (id) => { const s = dataRef.current?.stations.find((st) => st.id === id); if (s) setSelected(s); }),
@@ -202,7 +213,8 @@ export default function PhaserApp() {
           )}
         </div>
         {selected && (
-          <Inspector key={selected.id} node={node} models={models} io={io} onSave={saveHouse} onDelete={deleteHouse}
+          <Inspector key={selected.id} node={node} models={models} io={io}
+            onSave={saveHouse} onDelete={deleteHouse} onModelCreated={refetchModels}
             onClose={() => { setSelected(null); bus.emit('deselect'); }} />
         )}
       </div>

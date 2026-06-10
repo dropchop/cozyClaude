@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { HOUSE_STYLES } from './phaser/textures.js';
+import { AddModelDialog } from './AddModelDialog.jsx';
 
 // House inspector, shared by the React Flow app and the Phaser app. `node.data`
 // carries { name, model, style, system_prompt, output }. The optional `io` prop
-// (Phaser app only) adds connection + input/output sections.
-export function Inspector({ node, models, onSave, onDelete, onClose, io }) {
+// (Phaser app only) adds connection + input/output sections. `onModelCreated`
+// (also Phaser-only) is called after the user registers a custom model via
+// the "+" dialog so the parent can refetch the model list.
+export function Inspector({ node, models, onSave, onDelete, onClose, io, onModelCreated }) {
   const [name, setName] = useState(node.data.name);
   const [model, setModel] = useState(node.data.model || '');
   const [style, setStyle] = useState(node.data.style || 'cottage');
@@ -12,6 +15,10 @@ export function Inspector({ node, models, onSave, onDelete, onClose, io }) {
   const [saved, setSaved] = useState(false);
   const [showIn, setShowIn] = useState(false);
   const [showOut, setShowOut] = useState(false);
+  const [showAddModel, setShowAddModel] = useState(false);
+
+  const builtin = models.builtin || models.models || [];
+  const custom = models.custom || [];
 
   async function save() {
     await onSave({ name, model: model || null, style, system_prompt: prompt });
@@ -36,13 +43,45 @@ export function Inspector({ node, models, onSave, onDelete, onClose, io }) {
         <input value={name} onChange={(e) => setName(e.target.value)} />
       </label>
 
-      <label className="field">
+      <div className="field">
         <span>Model</span>
-        <select value={model} onChange={(e) => setModel(e.target.value)}>
-          <option value="">default ({models.default})</option>
-          {models.models.map((m) => <option key={m} value={m}>{m}</option>)}
-        </select>
-      </label>
+        <div className="model-row">
+          <select value={model} onChange={(e) => setModel(e.target.value)}>
+            <option value="">default ({models.default})</option>
+            {builtin.length > 0 && (
+              <optgroup label="Built-in (Anthropic)">
+                {builtin.map((m) => <option key={m} value={m}>{m}</option>)}
+              </optgroup>
+            )}
+            {custom.length > 0 && (
+              <optgroup label="Custom">
+                {custom.map((c) => (
+                  <option key={c.id} value={c.id}>{c.label} · {c.provider}</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+          {onModelCreated && (
+            <button
+              type="button"
+              className="add-model-btn"
+              title="Register a new model"
+              onClick={() => setShowAddModel(true)}
+            >＋</button>
+          )}
+        </div>
+      </div>
+
+      {showAddModel && (
+        <AddModelDialog
+          onCreated={(row) => {
+            setShowAddModel(false);
+            setModel(row.id);
+            onModelCreated?.(row);
+          }}
+          onClose={() => setShowAddModel(false)}
+        />
+      )}
 
       <div className="field">
         <span>Building style</span>
