@@ -51,11 +51,20 @@ export async function resolveModel(modelField) {
 }
 
 export function estimateCost(modelRecord, usage) {
-  const input = (usage?.input_tokens || 0)
-    + (usage?.cache_read_input_tokens || 0)
-    + (usage?.cache_creation_input_tokens || 0);
+  // Price each token bucket at its real rate. Cache reads cost ~0.1x input and
+  // cache writes ~1.25x (5-min TTL); the previous code summed both at the full
+  // input rate, which over-counts once caching is enabled. With caching off
+  // every cache bucket is 0, so this matches the old math today.
+  const input = usage?.input_tokens || 0;
+  const cacheWrite = usage?.cache_creation_input_tokens || 0;
+  const cacheRead = usage?.cache_read_input_tokens || 0;
   const output = usage?.output_tokens || 0;
-  return (input * modelRecord.inputPrice + output * modelRecord.outputPrice) / 1_000_000;
+  return (
+    input * modelRecord.inputPrice
+    + cacheWrite * modelRecord.inputPrice * 1.25
+    + cacheRead * modelRecord.inputPrice * 0.1
+    + output * modelRecord.outputPrice
+  ) / 1_000_000;
 }
 
 // How many output tokens we can afford at this model's price, given a running

@@ -10,6 +10,7 @@
     "seed": "node src/seed.mjs",
     "test:smoke": "node test/smoke.mjs",
     "test:run": "MOCK_LLM=1 node test/run.mjs",
+    "test:cost": "node test/cost.mjs",
     "test:decor": "node test/decor.mjs"
   },
   "dependencies": {

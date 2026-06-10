@@ -106,6 +106,15 @@ async function main() {
   assert(detail.steps.length === 4, 'persisted 4 steps');
   const total = detail.steps.reduce((s, st) => s + (st.tokens_used || 0), 0);
   assert(total > 0, 'tokens recorded');
+  // Run-level rollups persist on the runs row and match the sum of the steps.
+  assert(Number(detail.total_tokens) === total,
+    'run.total_tokens matches step sum (got ' + detail.total_tokens + ' vs ' + total + ')');
+  assert(detail.total_cost_usd != null, 'run.total_cost_usd persisted');
+  // Each step carries the input/output split, summing back to tokens_used.
+  const splitOk = detail.steps.every((st) =>
+    (Number(st.input_tokens) || 0) + (Number(st.output_tokens) || 0) === (Number(st.tokens_used) || 0));
+  assert(splitOk, 'each step input+output sums to tokens_used');
+  console.log('✓ run-level totals + per-step input/output split persisted');
   // C's mock output should reflect that it received upstream input (B + D concatenated).
   const cStep = detail.steps.find((s) => s.station_id === C);
   const cContent = cStep.artifacts[0].content;

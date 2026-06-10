@@ -115,6 +115,7 @@ async function executeRun(run, stations, connections, input) {
   const stationById = Object.fromEntries(stations.map((s) => [s.id, s]));
   const outputByStation = {};
   let totalCost = 0;
+  let totalTokens = 0;
 
   for (const stationId of order) {
     const station = stationById[stationId];
@@ -155,7 +156,8 @@ async function executeRun(run, stations, connections, input) {
       broadcast('run_step_update', {
         run_id: run.id, station_id: stationId, step_id: step.id, status: 'failed', error: message,
       });
-      await failRun(run.id, pipelineId, message);
+      await failRun(run.id, pipelineId, message,
+        { tokens: totalTokens, cost: totalCost });
       return;
     }
     const perCallMaxTokens = Math.min(modelRecord.defaultMaxTokens, budgetMaxTokens);
@@ -180,49 +182,71 @@ async function executeRun(run, stations, connections, input) {
       broadcast('run_step_update', {
         run_id: run.id, station_id: stationId, step_id: step.id, status: 'failed', error: message,
       });
-      await failRun(run.id, pipelineId, `station "${station.name}" failed: ${message}`);
+      await failRun(run.id, pipelineId, `station "${station.name}" failed: ${message}`,
+        { tokens: totalTokens, cost: totalCost });
       return;
     }
 
     outputByStation[stationId] = result.text;
+
+    const inTok = result.usage?.input_tokens || 0;
+    const outTok = result.usage?.output_tokens || 0;
+    console.log(
+      `[run ${run.id}] station "${station.name}" model=${result.model} ` +
+      `in=${inTok} out=${outTok} tokens=${result.tokens} cost=$${(result.cost || 0).toFixed(6)}`
+    );
 
     const artifact = await one(
       `INSERT INTO artifacts (run_step_id, type, content) VALUES ($1, 'text', $2) RETURNING *`,
       [step.id, result.text]
     );
     await query(
-      `UPDATE run_steps SET status = 'completed', tokens_used = $2, cost_usd = $3, finished_at = now()
+      `UPDATE run_steps SET status = 'completed', tokens_used = $2, input_tokens = $3,
+         output_tokens = $4, cost_usd = $5, finished_at = now()
        WHERE id = $1`,
-      [step.id, result.tokens, result.cost]
+      [step.id, result.tokens, inTok, outTok, result.cost]
     );
     broadcast('run_step_update', {
       run_id: run.id, station_id: stationId, step_id: step.id, status: 'completed',
-      tokens_used: result.tokens, cost_usd: result.cost,
+      tokens_used: result.tokens, input_tokens: inTok, output_tokens: outTok, cost_usd: result.cost,
       artifact: { id: artifact.id, type: 'text', content: result.text },
     });
 
     // Stop the run if cumulative cost crosses the ceiling.
     totalCost += result.cost || 0;
+    totalTokens += result.tokens || 0;
     if (totalCost > MAX_RUN_COST_USD) {
-      await failRun(run.id, pipelineId, `run exceeded cost ceiling ($${MAX_RUN_COST_USD.toFixed(2)})`);
+      await failRun(run.id, pipelineId, `run exceeded cost ceiling ($${MAX_RUN_COST_USD.toFixed(2)})`,
+        { tokens: totalTokens, cost: totalCost });
       return;
     }
   }
 
-  await query(`UPDATE runs SET status = 'completed', finished_at = now() WHERE id = $1`, [run.id]);
-  broadcast('run_update', { run_id: run.id, pipeline_id: pipelineId, status: 'completed' });
+  await query(
+    `UPDATE runs SET status = 'completed', total_tokens = $2, total_cost_usd = $3, finished_at = now()
+     WHERE id = $1`,
+    [run.id, totalTokens, totalCost]
+  );
+  broadcast('run_update', {
+    run_id: run.id, pipeline_id: pipelineId, status: 'completed',
+    total_tokens: totalTokens, total_cost_usd: totalCost,
+  });
   } finally {
     activeRuns.delete(pipelineId);
   }
 }
 
-async function failRun(runId, pipelineId, message) {
+async function failRun(runId, pipelineId, message, totals = {}) {
   try {
     await query(
-      `UPDATE runs SET status = 'failed', error = $2, finished_at = now() WHERE id = $1`,
-      [runId, message]
+      `UPDATE runs SET status = 'failed', error = $2, total_tokens = $3, total_cost_usd = $4,
+         finished_at = now() WHERE id = $1`,
+      [runId, message, totals.tokens ?? null, totals.cost ?? null]
     );
-    broadcast('run_update', { run_id: runId, pipeline_id: pipelineId, status: 'failed', error: message });
+    broadcast('run_update', {
+      run_id: runId, pipeline_id: pipelineId, status: 'failed', error: message,
+      total_tokens: totals.tokens ?? null, total_cost_usd: totals.cost ?? null,
+    });
   } catch (e) {
     console.error('failRun itself errored:', e);
   }
