@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS runs (
   error       TEXT,
   started_at  TIMESTAMPTZ,
   finished_at TIMESTAMPTZ,
+  total_tokens   INTEGER,                       -- run-level rollup of step tokens
+  total_cost_usd NUMERIC(10, 6),                -- run-level rollup of step cost
   created_at  TIMESTAMPTZ DEFAULT now()
 );
 
@@ -49,12 +51,20 @@ CREATE TABLE IF NOT EXISTS run_steps (
   run_id       UUID REFERENCES runs(id) ON DELETE CASCADE,
   station_id   UUID REFERENCES stations(id) ON DELETE CASCADE,
   status       TEXT NOT NULL DEFAULT 'pending', -- pending | running | completed | failed
-  tokens_used  INTEGER,
-  cost_usd     NUMERIC(10, 6),
+  tokens_used   INTEGER,                         -- input + output, kept for back-compat
+  input_tokens  INTEGER,
+  output_tokens INTEGER,
+  cost_usd      NUMERIC(10, 6),
   error        TEXT,
   started_at   TIMESTAMPTZ,
   finished_at  TIMESTAMPTZ
 );
+
+-- Upgrade older databases that predate the token/cost columns (idempotent on boot).
+ALTER TABLE run_steps ADD COLUMN IF NOT EXISTS input_tokens  INTEGER;
+ALTER TABLE run_steps ADD COLUMN IF NOT EXISTS output_tokens INTEGER;
+ALTER TABLE runs      ADD COLUMN IF NOT EXISTS total_tokens   INTEGER;
+ALTER TABLE runs      ADD COLUMN IF NOT EXISTS total_cost_usd NUMERIC(10, 6);
 
 -- Cosmetic map decorations (trees, roads, fountains, …). Purely visual — never
 -- part of the agent data model.
