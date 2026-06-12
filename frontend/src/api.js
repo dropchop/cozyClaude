@@ -28,6 +28,10 @@ export const api = {
   updateStation: (id, patch) => http('PATCH', `/api/stations/${id}`, patch),
   deleteStation: (id) => http('DELETE', `/api/stations/${id}`),
 
+  listPostOffices: () => http('GET', '/api/post-offices'),
+  getDistributions: (id) => http('GET', `/api/stations/${id}/distributions`),
+  setDistributions: (id, station_ids) => http('PUT', `/api/stations/${id}/distributions`, { station_ids }),
+
   addConnection: (pid, from_station_id, to_station_id) =>
     http('POST', `/api/pipelines/${pid}/connections`, { from_station_id, to_station_id }),
   deleteConnection: (id) => http('DELETE', `/api/connections/${id}`),

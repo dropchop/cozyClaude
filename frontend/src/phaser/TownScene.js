@@ -402,6 +402,12 @@ export class TownScene extends Phaser.Scene {
     const nubOut = this.add.circle(54, 30, 3, 0xdcb255).setStrokeStyle(1, 0x6b4a1c);
     const nubIn = this.add.circle(2, 30, 3, 0xcdeaf3).setStrokeStyle(1, 0x6b4a1c);
     container.add([roof, flag, wall, nubIn, nubOut]);
+    // Post offices read as mail hubs: blue flag + a 📮 badge on the wall.
+    if (s.type === 'post_office') {
+      flag.setTint(0x2e6fb0);
+      const badge = this.add.text(28, 30, '📮', { fontSize: '18px' }).setOrigin(0.5, 0.5);
+      container.add(badge);
+    }
     container.setScale(SCALE).setDepth(objectDepth(s.position_y + h)).setData('stationId', s.id);
 
     const cx = s.position_x + (56 * SCALE) / 2;

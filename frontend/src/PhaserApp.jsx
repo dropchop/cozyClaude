@@ -170,7 +170,7 @@ export default function PhaserApp() {
     } catch (e) { setError(e.message); }
   }
 
-  const node = selected && { data: { name: selected.name, model: selected.model, style: selected.style, system_prompt: selected.system_prompt, output: outputsRef.current[selected.id] } };
+  const node = selected && { data: { name: selected.name, model: selected.model, style: selected.style, system_prompt: selected.system_prompt, type: selected.type, send_to_post_office_id: selected.send_to_post_office_id, output: outputsRef.current[selected.id] } };
 
   // Upstream/downstream neighbors + the input/output text for the selected house,
   // mirroring how the orchestrator assembles each station's input.
@@ -214,6 +214,7 @@ export default function PhaserApp() {
         </div>
         {selected && (
           <Inspector key={selected.id} node={node} models={models} io={io}
+            stationId={selected.id} localStations={dataRef.current?.stations} currentPipelineId={pipelineId}
             onSave={saveHouse} onDelete={deleteHouse} onModelsChanged={refetchModels}
             onClose={() => { setSelected(null); bus.emit('deselect'); }} />
         )}
