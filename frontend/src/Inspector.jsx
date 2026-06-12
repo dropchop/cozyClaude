@@ -4,10 +4,10 @@ import { AddModelDialog } from './AddModelDialog.jsx';
 
 // House inspector, shared by the React Flow app and the Phaser app. `node.data`
 // carries { name, model, style, system_prompt, output }. The optional `io` prop
-// (Phaser app only) adds connection + input/output sections. `onModelCreated`
-// (also Phaser-only) is called after the user registers a custom model via
-// the "+" dialog so the parent can refetch the model list.
-export function Inspector({ node, models, onSave, onDelete, onClose, io, onModelCreated }) {
+// (Phaser app only) adds connection + input/output sections. `onModelsChanged`
+// (also Phaser-only) is a refetch callback fired after a custom model is added
+// or deleted via the "＋" dialog; its presence also gates the add/manage UI.
+export function Inspector({ node, models, onSave, onDelete, onClose, io, onModelsChanged }) {
   const [name, setName] = useState(node.data.name);
   const [model, setModel] = useState(node.data.model || '');
   const [style, setStyle] = useState(node.data.style || 'cottage');
@@ -17,8 +17,12 @@ export function Inspector({ node, models, onSave, onDelete, onClose, io, onModel
   const [showOut, setShowOut] = useState(false);
   const [showAddModel, setShowAddModel] = useState(false);
 
-  const builtin = models.builtin || models.models || [];
+  const builtin = models.builtin || []; // [{ id, input, output }]
   const custom = models.custom || [];
+
+  // Headline per-1M price shown next to each option so the cost trade-off is
+  // visible at the point of choice. 0/0 (e.g. local models) shows "free".
+  const priceTag = (i, o) => (!i && !o ? 'free' : `$${i}/$${o} per 1M`);
 
   async function save() {
     await onSave({ name, model: model || null, style, system_prompt: prompt });
@@ -29,6 +33,18 @@ export function Inspector({ node, models, onSave, onDelete, onClose, io, onModel
   async function pickStyle(next) {
     setStyle(next);
     await onSave({ style: next });
+  }
+
+  // Selecting a model persists immediately, mirroring the style picker — so a
+  // freshly-registered model (which just sets the selection) needs no extra Save.
+  async function pickModel(next) {
+    setModel(next);
+    await onSave({ model: next || null });
+  }
+
+  async function handleModelDeleted(id) {
+    if (id === model) await pickModel(''); // this house used it → fall back to default
+    onModelsChanged?.();
   }
 
   return (
@@ -46,26 +62,30 @@ export function Inspector({ node, models, onSave, onDelete, onClose, io, onModel
       <div className="field">
         <span>Model</span>
         <div className="model-row">
-          <select value={model} onChange={(e) => setModel(e.target.value)}>
+          <select value={model} onChange={(e) => pickModel(e.target.value)}>
             <option value="">default ({models.default})</option>
             {builtin.length > 0 && (
               <optgroup label="Built-in (Anthropic)">
-                {builtin.map((m) => <option key={m} value={m}>{m}</option>)}
+                {builtin.map((b) => (
+                  <option key={b.id} value={b.id}>{b.id} · {priceTag(b.input, b.output)}</option>
+                ))}
               </optgroup>
             )}
             {custom.length > 0 && (
               <optgroup label="Custom">
                 {custom.map((c) => (
-                  <option key={c.id} value={c.id}>{c.label} · {c.provider}</option>
+                  <option key={c.id} value={c.id}>
+                    {c.label} · {c.provider} · {priceTag(Number(c.input_price_per_m), Number(c.output_price_per_m))}
+                  </option>
                 ))}
               </optgroup>
             )}
           </select>
-          {onModelCreated && (
+          {onModelsChanged && (
             <button
               type="button"
               className="add-model-btn"
-              title="Register a new model"
+              title="Add or manage models"
               onClick={() => setShowAddModel(true)}
             >＋</button>
           )}
@@ -74,11 +94,13 @@ export function Inspector({ node, models, onSave, onDelete, onClose, io, onModel
 
       {showAddModel && (
         <AddModelDialog
+          custom={custom}
           onCreated={(row) => {
             setShowAddModel(false);
-            setModel(row.id);
-            onModelCreated?.(row);
+            onModelsChanged?.();
+            pickModel(row.id);
           }}
+          onDeleted={handleModelDeleted}
           onClose={() => setShowAddModel(false)}
         />
       )}

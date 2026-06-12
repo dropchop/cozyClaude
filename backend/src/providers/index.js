@@ -10,6 +10,14 @@ export function builtinModelIds() {
   return Object.keys(BUILTIN_MODELS);
 }
 
+// Built-in models with their headline per-1M prices — feeds the Inspector
+// dropdown so users see the cost trade-off at the point of choice. (The
+// cache-read/write multipliers in estimateCost are runtime detail, not the
+// headline rate shown here.)
+export function builtinModelList() {
+  return Object.entries(BUILTIN_MODELS).map(([id, m]) => ({ id, input: m.input, output: m.output }));
+}
+
 // Resolve a stations.model value (built-in name | custom_models.id UUID | null)
 // into a uniform record. Returns null when the value referred to a custom
 // model that has been deleted; callers decide how to fall back.

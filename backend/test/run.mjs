@@ -149,8 +149,10 @@ async function main() {
 
   const modelList = (await req('GET', '/api/models')).body;
   assert(Array.isArray(modelList.builtin) && modelList.builtin.length >= 4, 'builtin models listed');
+  assert(modelList.builtin.every((b) => b.id && typeof b.input === 'number' && typeof b.output === 'number'),
+    'builtin entries carry id + numeric input/output prices');
   assert(modelList.custom.some((c) => c.id === customModel.id), 'custom model in list');
-  console.log('✓ GET /api/models groups builtin + custom');
+  console.log('✓ GET /api/models groups builtin (with prices) + custom');
 
   // Assign the custom model UUID to a station on a new pipeline and run it —
   // exercises resolveModel's UUID branch via MOCK_LLM (no real API call).
@@ -187,10 +189,36 @@ async function main() {
     'mock dispatched to resolved modelId from custom_models row (got: ' + content.slice(0, 80) + ')');
   console.log('✓ resolveModel(UUID) routed to custom_models.model_id');
 
-  // Clean up the custom model and confirm the station falls back to default.
+  // Delete the custom model while a station still references it, then re-run:
+  // resolveModel must fall back to the default instead of crashing the run.
   const del = await req('DELETE', `/api/models/${customModel.id}`);
   assert(del.status === 204, 'custom model deleted');
   console.log('✓ DELETE /api/models/:id works');
+
+  const fbEvents = [];
+  const ws3 = new WebSocket(`ws://localhost:${PORT}/ws`);
+  ws3.on('message', (raw) => fbEvents.push(JSON.parse(raw.toString())));
+  await new Promise((r) => ws3.on('open', r));
+  const fbRun = await req('POST', `/api/pipelines/${mPid}/run`, { input: 'after delete' });
+  assert(fbRun.status === 202, 'fallback run started');
+  const fbRunId = fbRun.body.id;
+  await new Promise((resolve) => {
+    const check = () => {
+      if (fbEvents.some((e) => e.event === 'run_update' && e.data.run_id === fbRunId
+          && (e.data.status === 'completed' || e.data.status === 'failed'))) resolve();
+      else setTimeout(check, 20);
+    };
+    check();
+  });
+  ws3.close();
+  const fbFinal = fbEvents.filter((e) => e.event === 'run_update' && e.data.run_id === fbRunId).pop();
+  assert(fbFinal.data.status === 'completed',
+    'run with deleted-model station still completes via default fallback (got ' + fbFinal.data.status + ')');
+  const fbStep = fbEvents.filter((e) => e.event === 'run_step_update'
+    && e.data.run_id === fbRunId && e.data.status === 'completed').pop();
+  assert(fbStep.data.artifact.content.includes('[mock:claude-sonnet-4-6]'),
+    'deleted-model station fell back to DEFAULT_MODEL (got: ' + fbStep.data.artifact.content.slice(0, 80) + ')');
+  console.log('✓ deleted custom model → station falls back to default, run completes');
 
   server.close();
   console.log('\nALL ORCHESTRATION TESTS PASSED');
