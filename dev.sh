@@ -5,10 +5,22 @@
 cd "$(dirname "$0")"
 set -e
 
-echo "==> Installing backend deps"
-( cd backend && npm install )
-echo "==> Installing frontend deps"
-( cd frontend && npm install )
+# Install only when deps are missing or the lockfile changed since the last
+# install. npm writes node_modules/.package-lock.json after each successful
+# install, so if it's newer than package-lock.json nothing changed — skip the
+# redundant ~1s `npm install` on every launch.
+maybe_install() {
+  local dir=$1
+  if [ ! -d "$dir/node_modules" ] || [ "$dir/package-lock.json" -nt "$dir/node_modules/.package-lock.json" ]; then
+    echo "==> Installing $dir deps"
+    ( cd "$dir" && npm install )
+  else
+    echo "==> $dir deps already up to date"
+  fi
+}
+
+maybe_install backend
+maybe_install frontend
 
 if [ ! -f backend/.env ]; then
   cp backend/.env.example backend/.env

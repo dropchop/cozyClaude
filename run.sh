@@ -5,11 +5,25 @@
 set -e
 cd "$(dirname "$0")"
 
-echo "==> Installing backend deps"
-( cd backend && npm install )
+# Install only when deps are missing or the lockfile changed since the last
+# install. npm writes node_modules/.package-lock.json after each successful
+# install, so if it's newer than package-lock.json nothing changed — skip the
+# redundant npm install on every launch (the frontend is still rebuilt below).
+maybe_install() {
+  local dir=$1
+  if [ ! -d "$dir/node_modules" ] || [ "$dir/package-lock.json" -nt "$dir/node_modules/.package-lock.json" ]; then
+    echo "==> Installing $dir deps"
+    ( cd "$dir" && npm install )
+  else
+    echo "==> $dir deps already up to date"
+  fi
+}
 
-echo "==> Installing + building frontend"
-( cd frontend && npm install && npm run build )
+maybe_install backend
+
+echo "==> Building frontend"
+maybe_install frontend
+( cd frontend && npm run build )
 
 if [ ! -f backend/.env ]; then
   echo "==> No backend/.env found — creating from example (set ANTHROPIC_API_KEY!)"
