@@ -220,6 +220,110 @@ async function main() {
     'deleted-model station fell back to DEFAULT_MODEL (got: ' + fbStep.data.artifact.content.slice(0, 80) + ')');
   console.log('✓ deleted custom model → station falls back to default, run completes');
 
+  // ===== Post office: cross-town mail =====
+  // Town B (receiver): Bakery + Mill are the hub's distribution targets; Pastry is
+  // downstream of Bakery (must run via the sub-DAG); Lonely is unconnected and not
+  // a target (must NOT run). A hub `poB` distributes arrivals to Bakery + Mill.
+  const pidB = (await req('POST', '/api/pipelines', { name: 'Town B' })).body.id;
+  const bakery = await mkStation(pidB, 'Bakery', 0);
+  const mill = await mkStation(pidB, 'Mill', 200);
+  const pastry = await mkStation(pidB, 'Pastry', 400);
+  const lonely = await mkStation(pidB, 'Lonely', 600);
+  await req('POST', `/api/pipelines/${pidB}/connections`, { from_station_id: bakery, to_station_id: pastry });
+  const poB = (await req('POST', `/api/pipelines/${pidB}/stations`, {
+    name: 'B Post Office', system_prompt: 'mail', type: 'post_office', position_x: 800, position_y: 0,
+  })).body.id;
+  const putDist = await req('PUT', `/api/stations/${poB}/distributions`, { station_ids: [bakery, mill] });
+  assert(putDist.status === 200, 'B distribution set (got ' + putDist.status + ')');
+  const getDist = (await req('GET', `/api/stations/${poB}/distributions`)).body;
+  assert(getDist.length === 2 && getDist.includes(bakery) && getDist.includes(mill), 'distribution persisted');
+  const poList = (await req('GET', '/api/post-offices')).body;
+  assert(poList.some((p) => p.id === poB && p.pipeline_name === 'Town B'), 'GET /post-offices lists B hub with town name');
+  console.log('✓ Town B built: 📮 distributes arrivals to Bakery + Mill');
+
+  // Town A (sender): Worker -> A Post Office, which is addressed to B's hub.
+  const pidA = (await req('POST', '/api/pipelines', { name: 'Town A' })).body.id;
+  const worker = await mkStation(pidA, 'Worker', 0);
+  const poA = (await req('POST', `/api/pipelines/${pidA}/stations`, {
+    name: 'A Post Office', system_prompt: 'mail', type: 'post_office',
+    send_to_post_office_id: poB, position_x: 200, position_y: 0,
+  })).body.id;
+  await req('POST', `/api/pipelines/${pidA}/connections`, { from_station_id: worker, to_station_id: poA });
+  console.log('✓ Town A built: Worker -> 📮 -> Town B');
+
+  const poEvents = [];
+  const wsp = new WebSocket(`ws://localhost:${PORT}/ws`);
+  wsp.on('message', (raw) => poEvents.push(JSON.parse(raw.toString())));
+  await new Promise((r) => wsp.on('open', r));
+
+  const aRun = await req('POST', `/api/pipelines/${pidA}/run`, { input: 'fresh bread' });
+  assert(aRun.status === 202, 'Town A run started');
+  const aRunId = aRun.body.id;
+  // Wait for A to finish AND B's delivered (fire-and-forget) run to finish.
+  await new Promise((resolve) => {
+    const check = () => {
+      const aDone = poEvents.some((e) => e.event === 'run_update' && e.data.run_id === aRunId && e.data.status === 'completed');
+      const bDone = poEvents.some((e) => e.event === 'run_update' && e.data.pipeline_id === pidB && e.data.status === 'completed');
+      if (aDone && bDone) resolve(); else setTimeout(check, 20);
+    };
+    check();
+  });
+  wsp.close();
+
+  const poAStep = poEvents.find((e) => e.event === 'run_step_update' && e.data.station_id === poA && e.data.status === 'completed');
+  assert(poAStep && /Delivered to "Town B"/.test(poAStep.data.artifact.content), 'A hub shows a delivery receipt');
+  console.log('✓ sender receipt:', poAStep.data.artifact.content);
+
+  const bRunsList = (await req('GET', `/api/pipelines/${pidB}/runs`)).body;
+  assert(bRunsList.length === 1, 'exactly one delivered run in Town B (got ' + bRunsList.length + ')');
+  const bDetail = (await req('GET', `/api/runs/${bRunsList[0].id}`)).body;
+  const ranIds = bDetail.steps.map((s) => s.station_id);
+  assert(bDetail.steps.length === 3, 'sub-DAG ran exactly 3 stations (got ' + bDetail.steps.length + ')');
+  assert(ranIds.includes(bakery) && ranIds.includes(mill) && ranIds.includes(pastry), 'Bakery + Mill seeded, Pastry (downstream) ran');
+  assert(!ranIds.includes(lonely), 'unreachable Lonely did not run');
+  const bakeryStep = bDetail.steps.find((s) => s.station_id === bakery);
+  const bakeryChars = Number(bakeryStep.artifacts[0].content.match(/processed (\d+) chars/)?.[1] || 0);
+  assert(bakeryChars > 0, 'Bakery received the delivered mail (' + bakeryChars + ' chars)');
+  console.log('✓ one delivered B run: Bakery+Mill seeded, Pastry ran, Lonely skipped, mail received');
+
+  // ===== Loop / self-town guard =====
+  // A hub mailing another hub in its OWN town must not spawn a re-entrant run while
+  // the town is busy — the run lock makes delivery skip with a receipt. Also checks
+  // that a hub with no destination reports it rather than erroring.
+  const pidS = (await req('POST', '/api/pipelines', { name: 'Town S' })).body.id;
+  const sWorker = await mkStation(pidS, 'SWorker', 0);
+  const sHub2 = (await req('POST', `/api/pipelines/${pidS}/stations`, {
+    name: 'S Hub 2', system_prompt: 'mail', type: 'post_office', position_x: 400, position_y: 0,
+  })).body.id;
+  await req('PUT', `/api/stations/${sHub2}/distributions`, { station_ids: [sWorker] });
+  const sHub1 = (await req('POST', `/api/pipelines/${pidS}/stations`, {
+    name: 'S Hub 1', system_prompt: 'mail', type: 'post_office',
+    send_to_post_office_id: sHub2, position_x: 200, position_y: 0,
+  })).body.id;
+  await req('POST', `/api/pipelines/${pidS}/connections`, { from_station_id: sWorker, to_station_id: sHub1 });
+
+  const sEvents = [];
+  const wss = new WebSocket(`ws://localhost:${PORT}/ws`);
+  wss.on('message', (raw) => sEvents.push(JSON.parse(raw.toString())));
+  await new Promise((r) => wss.on('open', r));
+  const sRun = await req('POST', `/api/pipelines/${pidS}/run`, { input: 'loop me' });
+  const sRunId = sRun.body.id;
+  await new Promise((resolve) => {
+    const check = () => {
+      if (sEvents.some((e) => e.event === 'run_update' && e.data.run_id === sRunId && e.data.status === 'completed')) resolve();
+      else setTimeout(check, 20);
+    };
+    check();
+  });
+  wss.close();
+  const sHub1Step = sEvents.find((e) => e.event === 'run_step_update' && e.data.station_id === sHub1 && e.data.status === 'completed');
+  assert(/busy with a run/.test(sHub1Step.data.artifact.content), 'self-town delivery skipped via run lock (got: ' + sHub1Step.data.artifact.content + ')');
+  const sHub2Step = sEvents.find((e) => e.event === 'run_step_update' && e.data.station_id === sHub2 && e.data.status === 'completed');
+  assert(/No destination set/.test(sHub2Step.data.artifact.content), 'hub with no destination reports it');
+  const sRuns = (await req('GET', `/api/pipelines/${pidS}/runs`)).body;
+  assert(sRuns.length === 1, 'no re-entrant run spawned in own town (got ' + sRuns.length + ')');
+  console.log('✓ self-town mail blocked by run lock; no re-entrant run');
+
   server.close();
   console.log('\nALL ORCHESTRATION TESTS PASSED');
   process.exit(0);

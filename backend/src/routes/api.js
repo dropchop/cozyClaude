@@ -102,31 +102,34 @@ api.delete('/pipelines/:id', wrap(async (req, res) => {
 // ---- Stations ------------------------------------------------------------
 
 api.post('/pipelines/:id/stations', wrap(async (req, res) => {
-  const { name, system_prompt, position_x, position_y, model, style } = req.body;
+  const { name, system_prompt, position_x, position_y, model, style, type, send_to_post_office_id } = req.body;
   if (!name || !system_prompt) {
     return res.status(400).json({ error: 'name and system_prompt are required' });
   }
   const row = await one(
-    `INSERT INTO stations (pipeline_id, name, system_prompt, model, style, position_x, position_y)
-     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-    [req.params.id, name, system_prompt, model || null, style || null, position_x ?? 0, position_y ?? 0]
+    `INSERT INTO stations (pipeline_id, name, system_prompt, model, style, type, send_to_post_office_id, position_x, position_y)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+    [req.params.id, name, system_prompt, model || null, style || null, type || 'agent',
+      send_to_post_office_id || null, position_x ?? 0, position_y ?? 0]
   );
   res.status(201).json(row);
 }));
 
 api.patch('/stations/:id', wrap(async (req, res) => {
-  const { name, system_prompt, model, style, position_x, position_y } = req.body;
+  const { name, system_prompt, model, style, type, send_to_post_office_id, position_x, position_y } = req.body;
   const row = await one(
     `UPDATE stations SET
        name = COALESCE($2, name),
        system_prompt = COALESCE($3, system_prompt),
        model = COALESCE($4, model),
        style = COALESCE($5, style),
-       position_x = COALESCE($6, position_x),
-       position_y = COALESCE($7, position_y)
+       type = COALESCE($6, type),
+       send_to_post_office_id = COALESCE($7, send_to_post_office_id),
+       position_x = COALESCE($8, position_x),
+       position_y = COALESCE($9, position_y)
      WHERE id = $1 RETURNING *`,
     [req.params.id, name ?? null, system_prompt ?? null, model ?? null, style ?? null,
-      position_x ?? null, position_y ?? null]
+      type ?? null, send_to_post_office_id ?? null, position_x ?? null, position_y ?? null]
   );
   if (!row) return res.status(404).json({ error: 'not found' });
   res.json(row);
@@ -135,6 +138,42 @@ api.patch('/stations/:id', wrap(async (req, res) => {
 api.delete('/stations/:id', wrap(async (req, res) => {
   await query('DELETE FROM stations WHERE id = $1', [req.params.id]);
   res.status(204).end();
+}));
+
+// ---- Post offices (cross-town mail) --------------------------------------
+
+// Every post-office station across all towns, with its town name — populates the
+// "sends mail to" picker. Callers filter out the current town client-side.
+api.get('/post-offices', wrap(async (_req, res) => {
+  const rows = await query(
+    `SELECT s.id, s.name, s.pipeline_id, p.name AS pipeline_name
+       FROM stations s JOIN pipelines p ON p.id = s.pipeline_id
+      WHERE s.type = 'post_office'
+      ORDER BY p.name, s.name`
+  );
+  res.json(rows);
+}));
+
+// A post office's fan-out targets (local buildings it distributes arrivals to).
+api.get('/stations/:id/distributions', wrap(async (req, res) => {
+  const rows = await query(
+    'SELECT target_station_id FROM mail_distributions WHERE post_office_station_id = $1',
+    [req.params.id]
+  );
+  res.json(rows.map((r) => r.target_station_id));
+}));
+
+// Replace-all: set the post office's distribution targets to exactly `station_ids`.
+api.put('/stations/:id/distributions', wrap(async (req, res) => {
+  const ids = Array.isArray(req.body?.station_ids) ? req.body.station_ids : [];
+  await query('DELETE FROM mail_distributions WHERE post_office_station_id = $1', [req.params.id]);
+  for (const targetId of ids) {
+    await query(
+      'INSERT INTO mail_distributions (post_office_station_id, target_station_id) VALUES ($1, $2)',
+      [req.params.id, targetId]
+    );
+  }
+  res.json(ids);
 }));
 
 // ---- Connections ---------------------------------------------------------

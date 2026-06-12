@@ -26,6 +26,13 @@ CREATE TABLE IF NOT EXISTS stations (
 -- Upgrade older databases that predate the style column (idempotent on boot).
 ALTER TABLE stations ADD COLUMN IF NOT EXISTS style TEXT;
 
+-- Post office support. A station with type='post_office' is a town's mail hub:
+-- it forwards its gathered upstream output ("mail") to another town's post office
+-- (send_to_post_office_id), which fans the mail out to its local distribution
+-- targets (see mail_distributions). 'agent' stations are ordinary LLM houses.
+ALTER TABLE stations ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'agent';
+ALTER TABLE stations ADD COLUMN IF NOT EXISTS send_to_post_office_id UUID REFERENCES stations(id) ON DELETE SET NULL;
+
 CREATE TABLE IF NOT EXISTS connections (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   pipeline_id     UUID REFERENCES pipelines(id) ON DELETE CASCADE,
@@ -77,6 +84,17 @@ CREATE TABLE IF NOT EXISTS decorations (
   created_at  TIMESTAMPTZ DEFAULT now()
 );
 
+-- A receiving post office's fan-out targets: the local buildings (stations) it
+-- distributes arriving mail to. Kept separate from `connections` so it never
+-- participates in a town's normal run DAG — these edges only seed cross-town
+-- deliveries. Both FKs CASCADE so deleting a station prunes its routes.
+CREATE TABLE IF NOT EXISTS mail_distributions (
+  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  post_office_station_id UUID REFERENCES stations(id) ON DELETE CASCADE,
+  target_station_id      UUID REFERENCES stations(id) ON DELETE CASCADE,
+  created_at             TIMESTAMPTZ DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS artifacts (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   run_step_id  UUID REFERENCES run_steps(id) ON DELETE CASCADE,
@@ -107,3 +125,4 @@ CREATE INDEX IF NOT EXISTS idx_runs_pipeline        ON runs(pipeline_id);
 CREATE INDEX IF NOT EXISTS idx_run_steps_run        ON run_steps(run_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_step       ON artifacts(run_step_id);
 CREATE INDEX IF NOT EXISTS idx_decorations_pipeline ON decorations(pipeline_id);
+CREATE INDEX IF NOT EXISTS idx_mail_dist_po          ON mail_distributions(post_office_station_id);
