@@ -64,6 +64,30 @@ WebSocket + UI) from the backend on one port:
 Houses run in **topological order**. A house with several incoming tubes receives all
 upstream outputs concatenated. Roots (no incoming tube) receive the day's kickoff input.
 
+### 📮 Post offices (mail between towns)
+
+A **post office** is the one building whose reach crosses neighborhoods — it carries a
+prompt ("mail") from one town to another. Toggle any house to **📮 Post Office** in its
+inspector (the model/prompt fields swap for mail settings):
+
+- **Sends mail to** — pick *another* neighborhood's post office. Post offices only
+  address other post offices, never ordinary houses.
+- **Distributes arrivals to** — on the receiving side, tick the local houses that
+  arriving mail should be dropped at.
+
+A post office still sits in its own town's tube graph: wire houses into it, and when a
+run reaches it the output piped in becomes the **mail**. That mail is delivered to the
+post office it addresses, which starts **one** run of *its* neighborhood — seeding each
+of its distribution houses with the mail. Those houses and everything downstream of them
+run; unrelated houses stay idle. (The post office also passes the mail straight through
+to any of its own local downstream houses.)
+
+Delivery is **fire-and-forget**: the sending run never blocks on the other town. The
+post office's house shows a short **receipt** of what happened — *delivered to "Town" → N
+building(s)*, *town busy*, *no destination set*, or *loop guard*. Mail may be relayed at
+most `MAX_MAIL_DEPTH` hops (default 3), and a neighborhood already mid-run is skipped
+rather than re-entered, so chains of post offices can't loop forever.
+
 ### Build mode (decorating)
 
 Press **🔨 BUILD** — a building grid appears (it's hidden in normal play). Pick an item
@@ -113,8 +137,10 @@ later, swap `backend/src/db.js` for a `pg` Pool — the SQL is portable as-is.
 | `GET` | `/api/models` | allowed models + default |
 | `GET/POST` | `/api/pipelines` | list / create pipelines |
 | `GET/PATCH/DELETE` | `/api/pipelines/:id` | full graph (pipeline + stations + connections) / update / delete |
-| `POST` | `/api/pipelines/:id/stations` | add a station |
-| `PATCH/DELETE` | `/api/stations/:id` | edit (prompt, model, position) / delete |
+| `POST` | `/api/pipelines/:id/stations` | add a station (a house, or a `type:"post_office"` mail hub) |
+| `PATCH/DELETE` | `/api/stations/:id` | edit (prompt, model, type, `send_to_post_office_id`, position) / delete |
+| `GET` | `/api/post-offices` | every post-office station + its town — populates the "sends mail to" picker |
+| `GET/PUT` | `/api/stations/:id/distributions` | read / replace a post office's fan-out target houses (`{ station_ids }`) |
 | `POST` | `/api/pipelines/:id/connections` | lay a pneumatic tube |
 | `DELETE` | `/api/connections/:id` | remove a tube |
 | `GET/POST` | `/api/pipelines/:id/decorations` | list / place a decoration |
@@ -183,5 +209,7 @@ run.sh               install + build + seed + launch on one port (production)
 Matches the spec's v1 limits: manual routing only (no agent-decided routing), text
 artifacts only (tool use is a future upgrade), single-user (Tailscale handles access),
 full response before passing forward (no token-by-token piping between stations — though
-tokens *are* streamed live to the UI). Future upgrades: tool use, conditional wires,
-station templates, cost dashboard, pipeline export.
+tokens *are* streamed live to the UI). **Post offices** add manual cross-neighborhood
+delivery (fire-and-forget; one flat distribution list per hub — per-source routing,
+queuing for a busy town, and synchronous replies are future upgrades). Other future
+upgrades: tool use, conditional wires, station templates, cost dashboard, pipeline export.
