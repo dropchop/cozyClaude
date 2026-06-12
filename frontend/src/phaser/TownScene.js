@@ -93,10 +93,13 @@ export class TownScene extends Phaser.Scene {
         } else this.placeAt(p);
         return;
       }
-      // 2) move / wire / select (no active brush)
+      // 2) move / wire / select (no active brush). Wiring + moving are build-mode
+      // only; click-to-select stays live so houses are inspectable outside build.
       if (!this.brush && !this.spaceDown) {
-        const nub = this.houseNubUnder(p.worldX, p.worldY);
-        if (nub) { this.wire = { from: nub }; return; }
+        if (this.buildMode) {
+          const nub = this.houseNubUnder(p.worldX, p.worldY);
+          if (nub) { this.wire = { from: nub }; return; }
+        }
         const hid = this.houseUnderPointer(p.worldX, p.worldY);
         if (hid) {
           const rec = this.houses.get(hid);
@@ -129,10 +132,12 @@ export class TownScene extends Phaser.Scene {
         return;
       }
       if (this.drag) {
-        if (!this.drag.moved && Phaser.Math.Distance.Between(this.drag.startX, this.drag.startY, p.worldX, p.worldY) > DRAG_THRESHOLD) this.drag.moved = true;
-        if (this.drag.moved) {
-          this.moveDragged(p.worldX + this.drag.dx, p.worldY + this.drag.dy);
-          if (this.drag.kind === 'house') this.trackShake(p.worldX);
+        if (this.buildMode) {
+          if (!this.drag.moved && Phaser.Math.Distance.Between(this.drag.startX, this.drag.startY, p.worldX, p.worldY) > DRAG_THRESHOLD) this.drag.moved = true;
+          if (this.drag.moved) {
+            this.moveDragged(p.worldX + this.drag.dx, p.worldY + this.drag.dy);
+            if (this.drag.kind === 'house') this.trackShake(p.worldX);
+          }
         }
         return;
       }
@@ -318,6 +323,7 @@ export class TownScene extends Phaser.Scene {
   deleteSelected() {
     const active = document.activeElement;
     if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return; // typing
+    if (!this.buildMode) return; // deleting is an edit — build-mode only
     if (!this.selected) return;
     const { type, id } = this.selected;
     if (type === 'house') bus.emit('intent:deleteHouse', id);
