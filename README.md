@@ -114,7 +114,7 @@ villagers wander; lay some paths and they'll stroll along them.
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Frontend | React HUD + [Phaser 4](https://phaser.io) game canvas | the town renders in a Phaser scene (sprites, camera, particles, pathfinding NPCs); React owns the menus/inspector/run bar. Pathfinding via [pathfinding.js](https://www.npmjs.com/package/pathfinding). The old React Flow canvas is kept as a fallback at `?engine=reactflow`. |
+| Frontend | React HUD + [Phaser 4](https://phaser.io) game canvas | the town renders in a Phaser scene (sprites, camera, particles, pathfinding NPCs); React owns the menus/inspector/run bar. Pathfinding via [pathfinding.js](https://www.npmjs.com/package/pathfinding). |
 | Real-time | WebSocket | pushes `run_step_update` / `run_step_token` / `run_update` to the UI |
 | Backend | Node + Express | REST API + orchestrator + WS hub |
 | Database | **PGlite** (`@electric-sql/pglite`) | embedded PostgreSQL (WASM), persists to `backend/data/`. Same SQL dialect as a real Postgres server — see note below |
@@ -165,6 +165,7 @@ The backend ships clean-exit integration tests (no external services, run with `
 cd backend
 npm run test:smoke   # CRUD over a real socket + PGlite
 npm run test:run     # full A→B→C / D→C orchestration, topo order, WS streaming, persistence
+npm run test:ceiling # a run on an over-priced model is failed by the cost ceiling before any LLM call
 npm run test:decor   # decorations CRUD + building-style persistence + cascade delete
 
 cd ../frontend
@@ -180,23 +181,26 @@ backend/
     server.js        Express + WS + static UI host
     db.js            PGlite init + query helpers
     schema.sql       the database schema
-    anthropic.js     Claude integration (streaming, cost, MOCK_LLM)
     orchestrator.js  DAG topological execution + WS progress
     ws.js            WebSocket broadcast hub
+    providers/       LLM provider abstraction (anthropic/openai/google + model registry)
     routes/api.js    REST API
     seed.mjs         example "Blog Post Factory" pipeline
-  test/              smoke / run / integration tests
+  test/              smoke / run / ceiling / decor / integration tests
 frontend/
   src/
-    App.jsx          canvas, wiring, run controls, inspector, build mode
-    StationNode.jsx  the cozy house node (per-style building)
-    DecorNode.jsx    placed decoration node
+    main.jsx         entry — mounts the Phaser app
+    PhaserApp.jsx    React HUD: menus, run bar, build controls; mounts the canvas
+    TownCanvas.jsx   mounts the Phaser game
+    phaser/
+      TownScene.js   the scene: rendering, input, drag/wire, build grid
+      textures.js    procedural pixel-art textures (houses, decor, villagers)
+      pathfinding.js NPC A* routing   geometry.js  layout math   bus.js  React↔scene event bus
+    Inspector.jsx    house name/model/prompt/style + artifact view
+    AddModelDialog.jsx custom-model registry UI
+    BuildPalette.jsx build-mode tool/decoration palette
     Sprites.jsx      decoration sprite library + build palette catalog
-    BuildPreview.jsx translucent ghost line while dragging a road/path
     world.js         tile helpers + NPC walkmap (per-object walkable radius)
-    PneumaticTube.jsx custom tube edge with travelling carriers
-    TownLayer.jsx    path-favoring townsfolk overlay
-    Villager.jsx     pixel townsperson sprite
     useWebSocket.js  live-update hook
     api.js           REST client
     styles.css       SNES pixel-town theme
