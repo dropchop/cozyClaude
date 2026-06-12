@@ -14,7 +14,7 @@ bakery / cabin). Decorations and styles are saved on the server, so a town looks
 every device.
 
 ```
-[React + React Flow UI]  ⇄ HTTP + WebSocket ⇄  [Node + Express backend]  ⇄  [PGlite / Postgres]
+[React + Phaser UI]      ⇄ HTTP + WebSocket ⇄  [Node + Express backend]  ⇄  [PGlite / Postgres]
    canvas, wires,                                 REST API, orchestrator,        persistent
    live run view                                  WebSocket hub                  pipelines/runs/artifacts
                                                           ⇩
@@ -165,6 +165,7 @@ The backend ships clean-exit integration tests (no external services, run with `
 cd backend
 npm run test:smoke   # CRUD over a real socket + PGlite
 npm run test:run     # full A→B→C / D→C orchestration, topo order, WS streaming, persistence
+npm run test:cost    # unit: cost/budget math (cache-bucket pricing, ceiling-derived max tokens)
 npm run test:ceiling # a run on an over-priced model is failed by the cost ceiling before any LLM call
 npm run test:decor   # decorations CRUD + building-style persistence + cascade delete
 
