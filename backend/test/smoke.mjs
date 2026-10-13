@@ -1,6 +1,7 @@
 // Self-contained smoke test: boots the real Express app + PGlite, exercises the
 // REST API over a real socket, then exits. Run unsandboxed:
 //   PGLITE_DIR=/tmp/smoke-pg node test/smoke.mjs
+import './_env.mjs';
 import http from 'node:http';
 import express from 'express';
 import { initDb } from '../src/db.js';

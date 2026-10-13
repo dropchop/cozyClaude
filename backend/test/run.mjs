@@ -3,6 +3,7 @@
 // verifies live WS events, topological execution, artifact passing, and
 // persistence. Run unsandboxed:
 //   MOCK_LLM=1 PGLITE_DIR=/tmp/run-pg node test/run.mjs
+import './_env.mjs';
 import http from 'node:http';
 import express from 'express';
 import { WebSocket } from 'ws';
