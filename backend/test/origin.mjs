@@ -3,6 +3,7 @@
 // Run: node test/origin.mjs
 import './_env.mjs';
 import { spawn } from 'node:child_process';
+import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
@@ -52,6 +53,16 @@ r = await get('https://box.tailnet.ts.net:5173');
 assert(r.status === 200, 'ALLOWED_ORIGINS entry allowed');
 console.log('✓ same-origin, vite dev and ALLOWED_ORIGINS allowed');
 
+// DNS rebinding: a foreign Host is refused even when Origin matches it, and even with no Origin.
+const raw = (headers) => new Promise((resolve, reject) => {
+  http.get({ host: '127.0.0.1', port: PORT, path: '/api/pipelines', headers }, (res) => { res.resume(); resolve(res.statusCode); }).on('error', reject);
+});
+assert((await raw({ Host: `rebind.evil.test:${PORT}`, Origin: `http://rebind.evil.test:${PORT}` })) === 403, 'rebound Host+Origin refused');
+assert((await raw({ Host: `rebind.evil.test:${PORT}` })) === 403, 'rebound Host with no Origin refused');
+assert((await raw({ Host: `box.tailnet.ts.net:${PORT}` })) === 200, 'Host from ALLOWED_ORIGINS hostname allowed');
+assert((await raw({ Host: `dns.example:${PORT}` })) === 403, 'unlisted Host refused');
+console.log('✓ DNS rebinding (Host check)');
+
 // WebSocket
 const wsOutcome = (origin) => new Promise((resolve) => {
   const ws = new WebSocket(`ws://localhost:${PORT}/ws`, origin ? { headers: { Origin: origin } } : {});
@@ -63,6 +74,13 @@ const wsOutcome = (origin) => new Promise((resolve) => {
 assert((await wsOutcome('https://evil.example')) === 'rejected 403', 'evil WS refused');
 assert((await wsOutcome('http://localhost:5173')) === 'open', 'vite dev WS allowed');
 assert((await wsOutcome(null)) === 'open', 'no-Origin WS allowed');
+const wsHost = (host) => new Promise((resolve) => {
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { headers: { Host: host, Origin: `http://${host}` } });
+  ws.on('message', () => { ws.close(); resolve('open'); });
+  ws.on('unexpected-response', (_q, res) => resolve(`rejected ${res.statusCode}`));
+  ws.on('error', () => resolve('error'));
+});
+assert((await wsHost(`rebind.evil.test:${PORT}`)) === 'rejected 403', 'rebound WS refused');
 console.log('✓ WebSocket origin check');
 
 child.kill();

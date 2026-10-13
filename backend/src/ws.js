@@ -1,5 +1,5 @@
 import { WebSocketServer } from 'ws';
-import { isAllowedOrigin } from './origin.js';
+import { isAllowedRequest } from './origin.js';
 
 let wss = null;
 
@@ -9,7 +9,7 @@ export function initWebSocket(server) {
     path: '/ws',
     // Browsers always send Origin on WebSocket handshakes; refuse foreign pages.
     verifyClient: ({ req }, done) => {
-      const ok = isAllowedOrigin(req.headers.origin, req.headers.host);
+      const ok = isAllowedRequest(req.headers.origin, req.headers.host);
       done(ok, 403, 'origin not allowed');
     },
   });
