@@ -6,5 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 if (!process.env.PGLITE_DIR) {
-  process.env.PGLITE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'apb-test-pg-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'apb-test-pg-'));
+  process.env.PGLITE_DIR = dir;
+  // Remove only a directory created here (~27 MB each); never a caller-supplied one.
+  process.on('exit', () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } });
 }
