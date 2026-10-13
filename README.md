@@ -40,6 +40,20 @@ stream a deterministic mock response instead of calling Claude:
 MOCK_LLM=1 ./dev.sh
 ```
 
+### Access control and keys
+
+The API has no login, so the backend only answers browsers on origins it trusts:
+`localhost` / `127.0.0.1` (including the Vite dev UI on `:5173`) and the backend serving its own UI.
+Anything else gets `403`, which also stops other websites you visit from driving the API.
+
+- **Opening the UI by a LAN or tailnet name** (for example `http://192.168.1.20:5173` or
+  `https://box.tailnet.ts.net`) needs `ALLOWED_ORIGINS=<that origin>` in `backend/.env`
+  (comma-separated for several; optional `ALLOWED_HOSTS` adds bare host names). Without it the Vite
+  dev UI half-works: `/ws` connects but `/api` returns `403`, and the server logs `[origin] refused ...`.
+- **`openai-compatible` custom models** (OpenRouter, Groq, Ollama, ...) now read their key from
+  `OPENAI_COMPATIBLE_API_KEY`, not `OPENAI_API_KEY`, and `base_url` is only accepted for that provider.
+  `OPENAI_API_KEY` is sent only to the official OpenAI endpoint. If such a model returns `401`, set the new variable.
+
 ### Production single-port launch — `./run.sh`
 
 For an always-on deployment, `./run.sh` builds the UI and serves the whole app (API +
@@ -168,6 +182,11 @@ npm run test:run     # full A→B→C / D→C orchestration, topo order, WS stre
 npm run test:cost    # unit: cost/budget math (cache-bucket pricing, ceiling-derived max tokens)
 npm run test:ceiling # a run on an over-priced model is failed by the cost ceiling before any LLM call
 npm run test:decor   # decorations CRUD + building-style persistence + cascade delete
+npm run test:origin  # cross-origin / DNS-rebinding refusal (HTTP + WebSocket)
+npm run test:keyroute # provider keys never reach a custom base_url
+npm run test:patch   # PATCH /stations can clear model / destination
+npm run test:nodata  # tests never touch backend/data
+npm test             # all of the above (scratch databases; the live backend/data is never opened)
 
 cd ../frontend
 npm run test:phaser  # headless: geometry, texture coverage, NPC pathfinding/collision
@@ -212,7 +231,7 @@ run.sh               install + build + seed + launch on one port (production)
 ## Scope (v1)
 
 Matches the spec's v1 limits: manual routing only (no agent-decided routing), text
-artifacts only (tool use is a future upgrade), single-user (Tailscale handles access),
+artifacts only (tool use is a future upgrade), single-user (Tailscale handles access; list your tailnet origin in `ALLOWED_ORIGINS`),
 full response before passing forward (no token-by-token piping between stations — though
 tokens *are* streamed live to the UI). **Post offices** add manual cross-neighborhood
 delivery (fire-and-forget; one flat distribution list per hub — per-source routing,
