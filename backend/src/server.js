@@ -4,16 +4,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import cors from 'cors';
 import { initDb } from './db.js';
 import { initWebSocket } from './ws.js';
 import { api } from './routes/api.js';
+import { originGuard } from './origin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 4000;
 
 const app = express();
-app.use(cors());
+app.use(originGuard);
 app.use(express.json({ limit: '5mb' }));
 app.use('/api', api);
 
