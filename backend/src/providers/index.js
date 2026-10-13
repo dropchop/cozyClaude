@@ -86,11 +86,18 @@ export function maxOutputTokensForBudget(modelRecord, remainingUsd, inputTokens)
   return Math.floor((left * 1_000_000) / modelRecord.outputPrice);
 }
 
-function apiKeyFor(provider) {
-  if (provider === 'anthropic') return process.env.ANTHROPIC_API_KEY;
-  if (provider === 'openai' || provider === 'openai-compatible') return process.env.OPENAI_API_KEY;
-  if (provider === 'google') return process.env.GOOGLE_API_KEY;
-  return null;
+// Which key and endpoint a model may use. A provider key only ever goes to that
+// provider's own host: 'openai' ignores any custom base_url (so the key can't be
+// redirected), and 'openai-compatible' (arbitrary endpoints) never gets
+// OPENAI_API_KEY, only its own OPENAI_COMPATIBLE_API_KEY if one is configured.
+export function credentialsFor(record) {
+  switch (record.provider) {
+    case 'anthropic': return { apiKey: process.env.ANTHROPIC_API_KEY, baseUrl: null };
+    case 'openai': return { apiKey: process.env.OPENAI_API_KEY, baseUrl: null };
+    case 'openai-compatible': return { apiKey: process.env.OPENAI_COMPATIBLE_API_KEY || null, baseUrl: record.baseUrl };
+    case 'google': return { apiKey: process.env.GOOGLE_API_KEY, baseUrl: null };
+    default: return { apiKey: null, baseUrl: null };
+  }
 }
 
 // Lazy-load provider modules so the openai / google SDKs are only required
@@ -138,13 +145,13 @@ export async function runAgent({ system, input, model, maxTokens, onText }) {
 
   const provider = await loadProvider(record.provider);
   const effectiveMaxTokens = maxTokens ?? record.defaultMaxTokens;
-  const apiKey = apiKeyFor(record.provider);
+  const { apiKey, baseUrl } = credentialsFor(record);
 
   const result = await provider.run({
     system,
     input,
     modelId: record.modelId,
-    baseUrl: record.baseUrl,
+    baseUrl,
     apiKey,
     maxTokens: effectiveMaxTokens,
     supportsThinking: record.supportsThinking,

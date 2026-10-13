@@ -42,6 +42,16 @@ api.post('/models', wrap(async (req, res) => {
   if (!ALLOWED_PROVIDERS.includes(provider)) {
     return res.status(400).json({ error: `provider must be one of: ${ALLOWED_PROVIDERS.join(', ')}` });
   }
+  if (base_url) {
+    let u;
+    try { u = new URL(base_url); } catch { u = null; }
+    if (!u || (u.protocol !== 'http:' && u.protocol !== 'https:')) {
+      return res.status(400).json({ error: 'base_url must be an http(s) URL' });
+    }
+  }
+  if (provider === 'openai-compatible' && !base_url) {
+    return res.status(400).json({ error: 'base_url is required for openai-compatible models' });
+  }
   const row = await one(
     `INSERT INTO custom_models (label, provider, model_id, base_url, input_price_per_m, output_price_per_m)
      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
@@ -116,20 +126,28 @@ api.post('/pipelines/:id/stations', wrap(async (req, res) => {
 }));
 
 api.patch('/stations/:id', wrap(async (req, res) => {
-  const { name, system_prompt, model, style, type, send_to_post_office_id, position_x, position_y } = req.body;
+  const body = req.body || {};
+  const { name, system_prompt, type, position_x, position_y } = body;
+  // model, style and the mail destination are nullable: a present key (even null
+  // or "") clears the column; an absent key leaves it alone. The rest keep
+  // COALESCE semantics (they are NOT NULL).
+  const has = (k) => Object.prototype.hasOwnProperty.call(body, k);
+  const val = (k) => (body[k] === '' || body[k] === undefined ? null : body[k]);
   const row = await one(
     `UPDATE stations SET
        name = COALESCE($2, name),
        system_prompt = COALESCE($3, system_prompt),
-       model = COALESCE($4, model),
-       style = COALESCE($5, style),
-       type = COALESCE($6, type),
-       send_to_post_office_id = COALESCE($7, send_to_post_office_id),
-       position_x = COALESCE($8, position_x),
-       position_y = COALESCE($9, position_y)
+       model = CASE WHEN $4 THEN $5 ELSE model END,
+       style = CASE WHEN $6 THEN $7 ELSE style END,
+       type = COALESCE($8, type),
+       send_to_post_office_id = CASE WHEN $9 THEN $10 ELSE send_to_post_office_id END,
+       position_x = COALESCE($11, position_x),
+       position_y = COALESCE($12, position_y)
      WHERE id = $1 RETURNING *`,
-    [req.params.id, name ?? null, system_prompt ?? null, model ?? null, style ?? null,
-      type ?? null, send_to_post_office_id ?? null, position_x ?? null, position_y ?? null]
+    [req.params.id, name ?? null, system_prompt ?? null,
+      has('model'), val('model'), has('style'), val('style'), type ?? null,
+      has('send_to_post_office_id'), val('send_to_post_office_id'),
+      position_x ?? null, position_y ?? null]
   );
   if (!row) return res.status(404).json({ error: 'not found' });
   res.json(row);
