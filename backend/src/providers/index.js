@@ -147,16 +147,24 @@ export async function runAgent({ system, input, model, maxTokens, onText }) {
   const effectiveMaxTokens = maxTokens ?? record.defaultMaxTokens;
   const { apiKey, baseUrl } = credentialsFor(record);
 
-  const result = await provider.run({
-    system,
-    input,
-    modelId: record.modelId,
-    baseUrl,
-    apiKey,
-    maxTokens: effectiveMaxTokens,
-    supportsThinking: record.supportsThinking,
-    onText,
-  });
+  let result;
+  try {
+    result = await provider.run({
+      system,
+      input,
+      modelId: record.modelId,
+      baseUrl,
+      apiKey,
+      maxTokens: effectiveMaxTokens,
+      supportsThinking: record.supportsThinking,
+      onText,
+    });
+  } catch (err) {
+    if (record.provider === 'openai-compatible' && (err?.status === 401 || err?.status === 403)) {
+      err.message += ' (openai-compatible models use OPENAI_COMPATIBLE_API_KEY, not OPENAI_API_KEY)';
+    }
+    throw err;
+  }
 
   const usage = result.usage || {};
   const tokens = (usage.input_tokens || 0) + (usage.output_tokens || 0);

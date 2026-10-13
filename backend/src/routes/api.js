@@ -42,6 +42,10 @@ api.post('/models', wrap(async (req, res) => {
   if (!ALLOWED_PROVIDERS.includes(provider)) {
     return res.status(400).json({ error: `provider must be one of: ${ALLOWED_PROVIDERS.join(', ')}` });
   }
+  if (base_url && provider !== 'openai-compatible') {
+    // Only openai-compatible honors base_url; for other providers it would be stored and silently ignored.
+    return res.status(400).json({ error: 'base_url is only supported for openai-compatible models' });
+  }
   if (base_url) {
     let u;
     try { u = new URL(base_url); } catch { u = null; }
