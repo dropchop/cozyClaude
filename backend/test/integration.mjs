@@ -2,6 +2,7 @@
 // pipeline, serves index.html, and runs the seeded pipeline end-to-end with
 // MOCK_LLM. Clean-exit. Run unsandboxed:
 //   MOCK_LLM=1 PGLITE_DIR=/tmp/it-pg node test/integration.mjs
+import './_env.mjs';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';

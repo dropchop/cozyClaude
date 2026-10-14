@@ -8,6 +8,8 @@ function clientFor(baseUrl, apiKey) {
   if (clients.has(key)) return clients.get(key);
   const c = new OpenAI({
     apiKey: apiKey || 'sk-not-used', // openai-compatible local servers usually ignore this
+    // The SDK would otherwise fill these from OPENAI_ORG_ID / OPENAI_PROJECT_ID and send them to a custom endpoint.
+    ...(baseUrl ? { organization: null, project: null } : {}),
     ...(baseUrl ? { baseURL: baseUrl } : {}),
   });
   clients.set(key, c);

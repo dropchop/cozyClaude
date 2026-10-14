@@ -14,7 +14,7 @@
 // projection guard; the cumulative math is unit-covered by test/cost.mjs.
 process.env.MOCK_LLM = '1';
 process.env.MAX_RUN_COST_USD = '0.01';
-process.env.PGLITE_DIR ||= '/tmp/ceiling-pg';
+await import('./_env.mjs'); // scratch PGLITE_DIR
 process.env.ANTHROPIC_API_KEY ||= 'test-key-not-used'; // provider builds an SDK client at import
 
 const http = (await import('node:http')).default;

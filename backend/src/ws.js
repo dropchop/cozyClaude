@@ -1,9 +1,18 @@
 import { WebSocketServer } from 'ws';
+import { isAllowedRequest } from './origin.js';
 
 let wss = null;
 
 export function initWebSocket(server) {
-  wss = new WebSocketServer({ server, path: '/ws' });
+  wss = new WebSocketServer({
+    server,
+    path: '/ws',
+    // Browsers always send Origin on WebSocket handshakes; refuse foreign pages.
+    verifyClient: ({ req }, done) => {
+      const ok = isAllowedRequest(req.headers.origin, req.headers.host);
+      done(ok, 403, 'origin not allowed');
+    },
+  });
   wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ event: 'connected', data: { ts: Date.now() } }));
   });

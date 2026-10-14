@@ -12,7 +12,12 @@
     "test:run": "MOCK_LLM=1 node test/run.mjs",
     "test:cost": "node test/cost.mjs",
     "test:ceiling": "node test/ceiling.mjs",
-    "test:decor": "node test/decor.mjs"
+    "test:decor": "node test/decor.mjs",
+    "test:origin": "node test/origin.mjs",
+    "test:keyroute": "node test/keyroute.mjs",
+    "test:patch": "node test/patch-null.mjs",
+    "test:nodata": "node test/nodata.mjs",
+    "test": "npm run test:nodata && npm run test:smoke && npm run test:run && npm run test:cost && npm run test:ceiling && npm run test:decor && npm run test:origin && npm run test:keyroute && npm run test:patch"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",

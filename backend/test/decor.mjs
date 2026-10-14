@@ -1,5 +1,6 @@
 // Decorations CRUD + station style persistence, over a real socket. Clean-exit.
 //   PGLITE_DIR=/tmp/decor-pg node test/decor.mjs
+import './_env.mjs';
 import http from 'node:http';
 import express from 'express';
 import { initDb } from '../src/db.js';
