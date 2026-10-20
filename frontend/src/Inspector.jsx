@@ -9,7 +9,7 @@ import { api } from './api.js';
 // (also Phaser-only) is a refetch callback fired after a custom model is added
 // or deleted via the "＋" dialog; its presence also gates the add/manage UI.
 export function Inspector({ node, models, onSave, onDelete, onClose, io, onModelsChanged,
-  stationId, localStations, currentPipelineId }) {
+  stationId, localStations, currentPipelineId, onError }) {
   const [name, setName] = useState(node.data.name);
   const [model, setModel] = useState(node.data.model || '');
   const [style, setStyle] = useState(node.data.style || 'cottage');
@@ -33,8 +33,9 @@ export function Inspector({ node, models, onSave, onDelete, onClose, io, onModel
   useEffect(() => {
     if (!postOfficeCapable || !isPostOffice || !stationId) return;
     let cancelled = false;
-    api.listPostOffices().then((rows) => { if (!cancelled) setPostOffices(rows); }).catch(() => {});
-    api.getDistributions(stationId).then((ids) => { if (!cancelled) setDist(ids); }).catch(() => {});
+    const fail = (e) => { if (!cancelled) onError?.(e.message); };
+    api.listPostOffices().then((rows) => { if (!cancelled) setPostOffices(rows); }).catch(fail);
+    api.getDistributions(stationId).then((ids) => { if (!cancelled) setDist(ids); }).catch(fail);
     return () => { cancelled = true; };
   }, [postOfficeCapable, isPostOffice, stationId]);
 
@@ -80,7 +81,8 @@ export function Inspector({ node, models, onSave, onDelete, onClose, io, onModel
   async function toggleDist(id) {
     const next = dist.includes(id) ? dist.filter((x) => x !== id) : [...dist, id];
     setDist(next);
-    if (stationId) await api.setDistributions(stationId, next);
+    if (!stationId) return;
+    try { await api.setDistributions(stationId, next); } catch (e) { setDist(dist); onError?.(e.message); }
   }
 
   return (

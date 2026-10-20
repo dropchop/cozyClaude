@@ -7,6 +7,7 @@ import { buildNav, findPath, randomSpawn } from '../src/phaser/pathfinding.js';
 import { worldToTile, tileKey } from '../src/world.js';
 import { sceneTownData } from '../src/phaser/townData.js';
 import { readFileSync } from 'node:fs';
+import { forTown } from '../src/useWebSocket.js';
 
 let failed = 0;
 const ok = (c, m) => { console.log((c ? '✓' : '✗ FAIL') + ' ' + m); if (!c) failed++; };
@@ -71,6 +72,13 @@ ok(sceneTownData({}).connections.length === 0, 'missing arrays default to empty'
 // TownScene needs a Phaser runtime, so check its wiring by source.
 const sceneSrc = readFileSync(new URL('../src/phaser/TownScene.js', import.meta.url), 'utf8');
 ok(/renderData\(data\) \{\s*this\.data = sceneTownData\(data\);/.test(sceneSrc), 'TownScene.renderData keeps its own copy');
+
+// --- run events: the HUD reacts only to the town it shows
+ok(forTown({ pipeline_id: 'p1', status: 'failed' }, 'p1'), 'own town\'s run event accepted');
+ok(!forTown({ pipeline_id: 'p2', status: 'failed' }, 'p1'), 'another town\'s run event ignored');
+ok(!forTown({ status: 'failed' }, 'p1') && !forTown(undefined, 'p1') && !forTown({ pipeline_id: 'p1' }, null), 'untagged events ignored');
+const appSrc = readFileSync(new URL('../src/PhaserApp.jsx', import.meta.url), 'utf8');
+ok(/const \{ event, data \} = msg;\s*if \(!forTown\(data, pidRef\.current\)\) return;/.test(appSrc), 'PhaserApp filters run events by town');
 
 if (failed) { console.error(`\n${failed} CHECK(S) FAILED`); process.exit(1); }
 console.log('\nALL PHASER-LOGIC CHECKS PASSED');

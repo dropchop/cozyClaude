@@ -3,7 +3,7 @@ import { api } from './api.js';
 import { TownCanvas } from './TownCanvas.jsx';
 import { BuildPalette } from './BuildPalette.jsx';
 import { Inspector } from './Inspector.jsx';
-import { useWebSocket } from './useWebSocket.js';
+import { useWebSocket, forTown } from './useWebSocket.js';
 import { HOUSE_STYLES } from './phaser/textures.js';
 import { bus } from './phaser/bus.js';
 
@@ -27,17 +27,17 @@ export default function PhaserApp() {
 
   // ---- load ----
   const refetchModels = useCallback(() => {
-    api.models().then(setModels).catch(() => {});
+    api.models().then(setModels).catch((e) => setError(e.message));
   }, []);
 
   useEffect(() => {
     refetchModels();
-    api.listPipelines().then((list) => { setPipelines(list); if (list.length) setPipelineId((c) => c || list[0].id); }).catch(() => {});
+    api.listPipelines().then((list) => { setPipelines(list); if (list.length) setPipelineId((c) => c || list[0].id); }).catch((e) => setError(e.message));
   }, [refetchModels]);
 
   const loadPipeline = useCallback((id) => {
     if (!id) return;
-    api.getPipeline(id).then((p) => { dataRef.current = p; bus.emit('load', p); }).catch(() => {});
+    api.getPipeline(id).then((p) => { dataRef.current = p; bus.emit('load', p); }).catch((e) => setError(e.message));
   }, []);
   useEffect(() => { loadPipeline(pipelineId); setSelected(null); }, [pipelineId, loadPipeline]);
   useEffect(() => bus.on('scene:ready', () => { if (dataRef.current) bus.emit('load', dataRef.current); }), []);
@@ -100,6 +100,7 @@ export default function PhaserApp() {
   // ---- run visualization over WebSocket ----
   useWebSocket(useCallback((msg) => {
     const { event, data } = msg;
+    if (!forTown(data, pidRef.current)) return;
     if (event === 'run_step_update') {
       if (data.status === 'completed' && data.artifact) outputsRef.current[data.station_id] = data.artifact.content;
       bus.emit('house:status', { station_id: data.station_id, status: data.status, tokens_used: data.tokens_used, cost_usd: data.cost_usd });
@@ -117,7 +118,7 @@ export default function PhaserApp() {
     setRunning(true);
     bus.emit('run:active', true);
     (dataRef.current?.stations || []).forEach((s) => bus.emit('house:status', { station_id: s.id, status: 'pending' }));
-    try { await api.run(pipelineId, input); } catch { setRunning(false); bus.emit('run:active', false); }
+    try { await api.run(pipelineId, input); } catch (e) { setRunning(false); bus.emit('run:active', false); setError(e.message); }
   }
 
   // ---- HUD actions ----
@@ -215,7 +216,7 @@ export default function PhaserApp() {
         {selected && (
           <Inspector key={selected.id} node={node} models={models} io={io}
             stationId={selected.id} localStations={dataRef.current?.stations} currentPipelineId={pipelineId}
-            onSave={saveHouse} onDelete={deleteHouse} onModelsChanged={refetchModels}
+            onSave={saveHouse} onDelete={deleteHouse} onModelsChanged={refetchModels} onError={setError}
             onClose={() => { setSelected(null); bus.emit('deselect'); }} />
         )}
       </div>
