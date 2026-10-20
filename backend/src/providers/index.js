@@ -81,7 +81,7 @@ export function estimateCost(modelRecord, usage) {
 export function maxOutputTokensForBudget(modelRecord, remainingUsd, inputTokens) {
   const inputCost = (inputTokens * modelRecord.inputPrice) / 1_000_000;
   const left = remainingUsd - inputCost;
-  if (left <= 0) return 0;
+  if (!(left > 0)) return 0; // also catches NaN: an unreadable budget allows nothing
   if (!modelRecord.outputPrice) return Number.MAX_SAFE_INTEGER;
   return Math.floor((left * 1_000_000) / modelRecord.outputPrice);
 }

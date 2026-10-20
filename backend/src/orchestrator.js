@@ -1,17 +1,17 @@
 import { query, one } from './db.js';
 import { runAgent, resolveModel, DEFAULT_MODEL, maxOutputTokensForBudget } from './providers/index.js';
 import { broadcast } from './ws.js';
+import { numEnv } from './config.js';
 
 // One active run per pipeline — prevents an accidental double "Start the Day"
 // from firing two parallel pipeline runs.
 const activeRuns = new Set();
-// `??` (not `||`) so an operator can explicitly set the env var to 0 without
-// getting silently rewritten back to the default.
-const MAX_INPUT_CHARS = Number(process.env.MAX_INPUT_CHARS ?? 40000);
-const MAX_RUN_COST_USD = Number(process.env.MAX_RUN_COST_USD ?? 1.0);
+// An explicit 0 is honoured; a non-number refuses to boot (see config.js).
+const MAX_INPUT_CHARS = numEnv('MAX_INPUT_CHARS', 40000);
+const MAX_RUN_COST_USD = numEnv('MAX_RUN_COST_USD', 1.0);
 // How many times a single piece of mail may be relayed post-office → post-office
 // before delivery is refused. Bounds cross-town loops (A→B→A→…) and self-sends.
-const MAX_MAIL_DEPTH = Number(process.env.MAX_MAIL_DEPTH ?? 3);
+const MAX_MAIL_DEPTH = numEnv('MAX_MAIL_DEPTH', 3);
 
 /**
  * Create a run record and kick off execution in the background.
