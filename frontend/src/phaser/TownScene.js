@@ -4,6 +4,7 @@ import { bus } from './bus.js';
 import { SCALE, DEPTH, houseSize, houseAnchor, objectDepth, contentBounds, tubeControl } from './geometry.js';
 import { GROUND, LINE_KINDS, lineCells, worldToTile, tileTopLeft, snap } from '../world.js';
 import { buildNav, findPath, pickTarget, randomSpawn } from './pathfinding.js';
+import { sceneTownData } from './townData.js';
 
 const N_VILLAGERS = 8;
 // cap A* grid-clone calls per frame so synchronized re-targets can't hitch
@@ -377,7 +378,7 @@ export class TownScene extends Phaser.Scene {
 
   // ---------- rendering ----------
   renderData(data) {
-    this.data = { stations: data.stations || [], decorations: data.decorations || [], connections: data.connections || [] };
+    this.data = sceneTownData(data);
     this.houses.forEach((h) => { h.container.destroy(); h.label.destroy(); });
     this.decor.forEach((d) => d.destroy());
     this.houses.clear(); this.decor.clear();

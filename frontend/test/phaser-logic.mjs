@@ -5,6 +5,8 @@ import { houseSize, houseCenter, houseAnchor, objectDepth, contentBounds, tubeCo
 import { HOUSE_STYLES, ROOF_COLORS, STATUS_TINT, VILLAGER_VARIANTS } from '../src/phaser/textures.js';
 import { buildNav, findPath, randomSpawn } from '../src/phaser/pathfinding.js';
 import { worldToTile, tileKey } from '../src/world.js';
+import { sceneTownData } from '../src/phaser/townData.js';
+import { readFileSync } from 'node:fs';
 
 let failed = 0;
 const ok = (c, m) => { console.log((c ? '✓' : '✗ FAIL') + ' ' + m); if (!c) failed++; };
@@ -55,6 +57,20 @@ if (Array.isArray(path)) {
   ok(!crosses, 'path never crosses a blocked tile');
 }
 ok(randomSpawn(nav) !== null, 'randomSpawn yields a point');
+
+// --- HUD/scene town data: a new tube pushed by both sides is stored once in each
+const hud = { stations: [{ id: 'a' }], decorations: [], connections: [] };
+const scene = sceneTownData(hud);
+const tubeRow = { id: 't1' };
+hud.connections.push(tubeRow); scene.connections.push(tubeRow);
+hud.decorations.push({ id: 'd1' }); scene.decorations.push(hud.decorations[0]);
+ok(hud.connections.length === 1 && scene.connections.length === 1, 'new tube stored once on each side');
+ok(hud.decorations.length === 1 && scene.decorations.length === 1, 'new decoration stored once on each side');
+ok(scene.stations[0] === hud.stations[0], 'rows stay shared (drags update both)');
+ok(sceneTownData({}).connections.length === 0, 'missing arrays default to empty');
+// TownScene needs a Phaser runtime, so check its wiring by source.
+const sceneSrc = readFileSync(new URL('../src/phaser/TownScene.js', import.meta.url), 'utf8');
+ok(/renderData\(data\) \{\s*this\.data = sceneTownData\(data\);/.test(sceneSrc), 'TownScene.renderData keeps its own copy');
 
 if (failed) { console.error(`\n${failed} CHECK(S) FAILED`); process.exit(1); }
 console.log('\nALL PHASER-LOGIC CHECKS PASSED');
