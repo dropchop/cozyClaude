@@ -48,8 +48,9 @@ Anything else gets `403`, which also stops other websites you visit from driving
 
 - **Opening the UI by a LAN or tailnet name** (for example `http://192.168.1.20:5173` or
   `https://box.tailnet.ts.net`) needs `ALLOWED_ORIGINS=<that origin>` in `backend/.env`
-  (comma-separated for several; optional `ALLOWED_HOSTS` adds bare host names). Without it the Vite
-  dev UI half-works: `/ws` connects but `/api` returns `403`, and the server logs `[origin] refused ...`.
+  (comma-separated for several; optional `ALLOWED_HOSTS` adds bare host names). Without it `/api` and
+  `/ws` answer `403`, the page shows which value to add, and the server logs `[origin] refused ...`.
+  **Upgrading an install you reach over Tailscale or the LAN: add this line before you restart.**
 - **`openai-compatible` custom models** (OpenRouter, Groq, Ollama, ...) now read their key from
   `OPENAI_COMPATIBLE_API_KEY`, not `OPENAI_API_KEY`, and `base_url` is only accepted for that provider.
   `OPENAI_API_KEY` is sent only to the official OpenAI endpoint. If such a model returns `401`, set the new variable.
@@ -100,7 +101,8 @@ Delivery is **fire-and-forget**: the sending run never blocks on the other town.
 post office's house shows a short **receipt** of what happened — *delivered to "Town" → N
 building(s)*, *town busy*, *no destination set*, or *loop guard*. Mail may be relayed at
 most `MAX_MAIL_DEPTH` hops (default 3), and a neighborhood already mid-run is skipped
-rather than re-entered, so chains of post offices can't loop forever.
+rather than re-entered, so chains of post offices can't loop forever. Every run that one
+click's mail starts shares that click's `MAX_RUN_COST_USD` ceiling.
 
 ### Build mode (decorating)
 
@@ -186,6 +188,9 @@ npm run test:origin  # cross-origin / DNS-rebinding refusal (HTTP + WebSocket)
 npm run test:keyroute # provider keys never reach a custom base_url
 npm run test:patch   # PATCH /stations can clear model / destination
 npm run test:nodata  # tests never touch backend/data
+npm run test:config  # a non-numeric MAX_* setting refuses to boot
+npm run test:budget  # one ceiling per click across mail, system prompt projected, model prices validated
+npm run test:graph   # tube/distribution validation, duplicate-tube cleanup, restart sweep of open runs
 npm test             # all of the above (scratch databases; the live backend/data is never opened)
 
 cd ../frontend
