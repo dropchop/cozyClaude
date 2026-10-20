@@ -60,10 +60,20 @@ api.post('/models', wrap(async (req, res) => {
   if (provider === 'openai-compatible' && !base_url) {
     return res.status(400).json({ error: 'base_url is required for openai-compatible models' });
   }
+  const [inPrice, outPrice] = [input_price_per_m, output_price_per_m]
+    .map((v) => (v === undefined || v === null || v === '' ? 0 : Number(v)));
+  if (![inPrice, outPrice].every((p) => Number.isFinite(p) && p >= 0)) {
+    return res.status(400).json({ error: 'prices must be numbers >= 0 (USD per 1M tokens)' });
+  }
+  // A paid provider at $0 would run outside the cost ceiling. Only an
+  // openai-compatible endpoint (e.g. a local model) may be free.
+  if (provider !== 'openai-compatible' && !(inPrice > 0 && outPrice > 0)) {
+    return res.status(400).json({ error: `input and output prices are required for ${provider} models` });
+  }
   const row = await one(
     `INSERT INTO custom_models (label, provider, model_id, base_url, input_price_per_m, output_price_per_m)
      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-    [label, provider, model_id, base_url || null, Number(input_price_per_m) || 0, Number(output_price_per_m) || 0]
+    [label, provider, model_id, base_url || null, inPrice, outPrice]
   );
   res.status(201).json(row);
 }));

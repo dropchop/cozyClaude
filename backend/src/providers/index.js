@@ -45,12 +45,15 @@ export async function resolveModel(modelField) {
   if (UUID_RE.test(name)) {
     const row = await one('SELECT * FROM custom_models WHERE id = $1', [name]);
     if (!row) return null;
+    // Never bill below zero, nor an Anthropic alias below its list price (rows
+    // saved before prices were validated could say 0 or negative).
+    const list = row.provider === 'anthropic' ? BUILTIN_MODELS[row.model_id] : null;
     return {
       provider: row.provider,
       modelId: row.model_id,
       label: row.label,
-      inputPrice: Number(row.input_price_per_m) || 0,
-      outputPrice: Number(row.output_price_per_m) || 0,
+      inputPrice: Math.max(Number(row.input_price_per_m) || 0, list?.input ?? 0),
+      outputPrice: Math.max(Number(row.output_price_per_m) || 0, list?.output ?? 0),
       supportsThinking: false,
       defaultMaxTokens: 4000,
       baseUrl: row.base_url,

@@ -17,6 +17,8 @@ const { WebSocket } = await import('ws');
 const { initDb } = await import('../src/db.js');
 const { initWebSocket } = await import('../src/ws.js');
 const { api } = await import('../src/routes/api.js');
+const { query, one } = await import('../src/db.js');
+const { resolveModel } = await import('../src/providers/index.js');
 
 const PORT = 4570;
 const base = `http://localhost:${PORT}`;
@@ -121,6 +123,27 @@ async function main() {
     && e.data.station_id === T && e.data.status === 'skipped');
   assert(tEvent, 'the skipped step is broadcast');
   console.log('✓ a failed run leaves no step pending');
+
+  // --- S4: custom-model prices. Negative or missing prices on a paid provider
+  // would run outside the ceiling; only openai-compatible may be free.
+  const addModel = (body) => req('POST', '/api/models', { label: 'm', model_id: 'claude-opus-4-8', ...body });
+  for (const [label, body, want] of [
+    ['negative prices', { provider: 'openai-compatible', base_url: 'http://localhost:11434/v1', input_price_per_m: -5, output_price_per_m: -25 }, 400],
+    ['non-numeric price', { provider: 'openai-compatible', base_url: 'http://localhost:11434/v1', input_price_per_m: 'abc', output_price_per_m: 1 }, 400],
+    ['anthropic at $0', { provider: 'anthropic', input_price_per_m: 0, output_price_per_m: 0 }, 400],
+    ['google with no prices', { provider: 'google' }, 400],
+    ['free local model', { provider: 'openai-compatible', base_url: 'http://localhost:11434/v1' }, 201],
+  ]) {
+    const got = (await addModel(body)).status;
+    assert(got === want, `${label}: want ${want}, got ${got}`);
+  }
+  // Rows saved before validation are billed at no less than the list price.
+  const legacy = await one(`INSERT INTO custom_models (label, provider, model_id, input_price_per_m, output_price_per_m)
+    VALUES ('old', 'anthropic', 'claude-opus-4-8', -5, 0) RETURNING id`);
+  const rec = await resolveModel(legacy.id);
+  assert(rec.inputPrice === 5 && rec.outputPrice === 25, `legacy alias billed at list price (got ${rec.inputPrice}/${rec.outputPrice})`);
+  await query('DELETE FROM custom_models WHERE id = $1', [legacy.id]);
+  console.log('✓ custom-model prices validated; legacy aliases floored at list price');
 
   // --- S8 (server side): every step and token event carries its run's town.
   const townOf = {};
