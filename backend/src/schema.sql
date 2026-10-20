@@ -129,9 +129,19 @@ CREATE INDEX IF NOT EXISTS idx_mail_dist_po          ON mail_distributions(post_
 
 -- One tube per ordered pair of houses. Older databases can hold duplicates (each
 -- fed the downstream house the same output twice): keep one of each first, so
--- the unique index can build. Both statements are idempotent.
-DELETE FROM connections a USING connections b
- WHERE a.from_station_id = b.from_station_id AND a.to_station_id = b.to_station_id AND a.id > b.id;
+-- the unique index can build. The copy kept is one filed under its houses' own
+-- town whenever there is one, so this never drops a real tube in favour of a
+-- wrong-town copy (deleted below), whatever the ids. Both statements are idempotent.
+WITH ranked AS (
+  SELECT c.id, row_number() OVER (
+    PARTITION BY c.from_station_id, c.to_station_id
+    ORDER BY (f.pipeline_id = c.pipeline_id AND t.pipeline_id = c.pipeline_id) DESC NULLS LAST, c.id
+  ) AS n
+  FROM connections c
+  LEFT JOIN stations f ON f.id = c.from_station_id
+  LEFT JOIN stations t ON t.id = c.to_station_id
+)
+DELETE FROM connections WHERE id IN (SELECT id FROM ranked WHERE n > 1);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_connections_pair ON connections(from_station_id, to_station_id);
 
 -- Rows the API now refuses but older versions stored. They never take part in a

@@ -109,6 +109,32 @@ async function main() {
     `a legacy loop names its houses (got ${loopDetail.status}: ${loopDetail.error})`);
   console.log('✓ legacy cross-town rows cleaned at boot; a legacy loop is named in the run error');
 
+  // --- Boot cleanup never drops a tube that is valid on its own, whatever the
+  // ids: each pair keeps exactly one row, filed under its houses' town.
+  const H = await town('Home'); const O = await town('Other');
+  const u = await station(H, 'u'); const v = await station(H, 'v'); const w = await station(H, 'w');
+  const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  await query('DROP INDEX uq_connections_pair');
+  await query(`INSERT INTO connections (id, pipeline_id, from_station_id, to_station_id) VALUES
+    ($1, $4, $6, $7), ($2, $5, $6, $7),  -- real u->v has the HIGHER id (the reviewer's pair)
+    ($3, $4, $6, $8), ($9, $5, $6, $8),  -- real u->w has the lower id
+    ($10, $5, $7, $8), ($11, $4, $7, $8), ($12, $4, $7, $8)`, // v->w: wrong-town lowest, two real copies
+  [uuid(99), uuid(50), uuid(10), H, O, u, v, w, uuid(90), uuid(5), uuid(20), uuid(30)]);
+  await initDb();
+  for (const [label, from, to] of [['u->v', u, v], ['u->w', u, w], ['v->w', v, w]]) {
+    const rows = await query('SELECT pipeline_id FROM connections WHERE from_station_id = $1 AND to_station_id = $2', [from, to]);
+    assert(rows.length === 1 && rows[0].pipeline_id === H, `${label}: one real tube survives boot (got ${rows.length})`);
+  }
+  console.log('✓ boot cleanup keeps every real tube, whatever the ids of its wrong-town copies');
+
+  // --- The runs list can be limited to the latest run (the HUD reads only that).
+  await query(`INSERT INTO runs (pipeline_id, status, created_at) VALUES ($1, 'completed', now() - interval '1 minute'), ($1, 'failed', now())`, [H]);
+  const all = (await req('GET', `/api/pipelines/${H}/runs`)).body;
+  const latest = (await req('GET', `/api/pipelines/${H}/runs?limit=1`)).body;
+  assert(all.length === 2 && latest.length === 1 && latest[0].status === 'failed', `?limit=1 returns only the newest (got ${latest.length})`);
+  assert((await req('GET', `/api/pipelines/${H}/runs?limit=abc`)).status === 400, 'bad limit is 400');
+  console.log('✓ runs list honours ?limit');
+
   // --- S7: a run left open by a restart is closed at boot.
   const run = await one(`INSERT INTO runs (pipeline_id, status, started_at) VALUES ($1, 'running', now()) RETURNING id`, [P]);
   const ran = await one(`INSERT INTO run_steps (run_id, station_id, status) VALUES ($1, $2, 'running') RETURNING id`, [run.id, A]);

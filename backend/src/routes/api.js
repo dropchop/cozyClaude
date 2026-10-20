@@ -337,10 +337,13 @@ api.post('/pipelines/:id/run', wrap(async (req, res) => {
   res.status(202).json(run);
 }));
 
+// Newest first. ?limit=N returns only the latest N (the HUD asks for 1).
 api.get('/pipelines/:id/runs', wrap(async (req, res) => {
+  const limit = req.query.limit === undefined ? null : Number(req.query.limit);
+  if (limit !== null && !(Number.isInteger(limit) && limit > 0)) throw httpError(400, 'limit must be a positive integer');
   const rows = await query(
-    'SELECT * FROM runs WHERE pipeline_id = $1 ORDER BY created_at DESC',
-    [req.params.id]
+    'SELECT * FROM runs WHERE pipeline_id = $1 ORDER BY created_at DESC LIMIT $2',
+    [req.params.id, limit]
   );
   res.json(rows);
 }));
