@@ -133,3 +133,13 @@ CREATE INDEX IF NOT EXISTS idx_mail_dist_po          ON mail_distributions(post_
 DELETE FROM connections a USING connections b
  WHERE a.from_station_id = b.from_station_id AND a.to_station_id = b.to_station_id AND a.id > b.id;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_connections_pair ON connections(from_station_id, to_station_id);
+
+-- Rows the API now refuses but older versions stored. They never take part in a
+-- run, and a hidden cross-town distribution target made every later edit of that
+-- post office's checklist fail. Idempotent.
+DELETE FROM connections c USING stations f, stations t
+ WHERE f.id = c.from_station_id AND t.id = c.to_station_id
+   AND (f.pipeline_id IS DISTINCT FROM c.pipeline_id OR t.pipeline_id IS DISTINCT FROM c.pipeline_id);
+DELETE FROM mail_distributions d USING stations po, stations t
+ WHERE po.id = d.post_office_station_id AND t.id = d.target_station_id
+   AND (t.pipeline_id IS DISTINCT FROM po.pipeline_id OR t.id = po.id);

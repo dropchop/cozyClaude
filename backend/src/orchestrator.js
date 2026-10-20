@@ -157,7 +157,15 @@ async function executeRun(run, stations, connections, input, opts = {}) {
     }
   }
   if (order.length !== activeStations.length) {
-    await failRun(run.id, pipelineId, 'pipeline graph has a cycle');
+    // Name one loop so the owner knows which tube to remove. Every unsorted
+    // station has an unsorted upstream, so walking upstream must repeat.
+    const stuck = new Set(activeStations.map((s) => s.id).filter((id) => indeg[id] > 0));
+    const path = [];
+    let id = stuck.values().next().value;
+    while (!path.includes(id)) { path.push(id); id = upstream[id].find((u) => stuck.has(u)); }
+    const loop = path.slice(path.indexOf(id)).reverse().map((n) => `"${stationById[n].name}"`);
+    await failRun(run.id, pipelineId,
+      `pipeline graph has a cycle: ${[...loop, loop[0]].join(' → ')}; remove one of those tubes`);
     return;
   }
 

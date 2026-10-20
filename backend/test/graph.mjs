@@ -84,6 +84,31 @@ async function main() {
   assert(await one(`SELECT 1 FROM pg_indexes WHERE indexname = 'uq_connections_pair'`), 'unique index rebuilt at boot');
   console.log('✓ boot dedupes legacy duplicate tubes and builds the unique index');
 
+  // --- Legacy rows the API now refuses: cleaned at boot (cross-town), or named
+  // in the run error (a loop, since only the owner knows which tube to drop).
+  const Y = await town('Legacy');
+  const L1 = await station(Y, 'L1'); const L2 = await station(Y, 'L2');
+  const lpo = await station(Y, 'LPO', { type: 'post_office' });
+  await query(`INSERT INTO connections (pipeline_id, from_station_id, to_station_id) VALUES ($1, $2, $3), ($1, $3, $2), ($1, $2, $4)`, [Y, L1, L2, far]);
+  await query(`INSERT INTO mail_distributions (post_office_station_id, target_station_id) VALUES ($1, $2), ($1, $3), ($1, $1)`, [lpo, L1, far]);
+  await initDb();
+  const yTubes = await query('SELECT from_station_id, to_station_id FROM connections WHERE pipeline_id = $1', [Y]);
+  assert(yTubes.length === 2 && !yTubes.some((c) => c.to_station_id === far), `boot drops the cross-town tube only (got ${yTubes.length})`);
+  const yDist = (await req('GET', `/api/stations/${lpo}/distributions`)).body;
+  assert(yDist.length === 1 && yDist[0] === L1, `boot drops cross-town and self distributions (got ${JSON.stringify(yDist)})`);
+  r = await req('PUT', `/api/stations/${lpo}/distributions`, { station_ids: [L1, L2] });
+  assert(r.status === 200, `that post office's checklist is editable again (got ${r.status})`);
+  const loopRun = (await req('POST', `/api/pipelines/${Y}/run`, { input: 'hi' })).body;
+  let loopDetail;
+  for (let i = 0; i < 100; i++) {
+    loopDetail = (await req('GET', `/api/runs/${loopRun.id}`)).body;
+    if (loopDetail.status !== 'running') break;
+    await new Promise((res) => setTimeout(res, 50));
+  }
+  assert(loopDetail.status === 'failed' && /cycle: "L[12]" → "L[12]" → "L[12]"; remove one/.test(loopDetail.error || ''),
+    `a legacy loop names its houses (got ${loopDetail.status}: ${loopDetail.error})`);
+  console.log('✓ legacy cross-town rows cleaned at boot; a legacy loop is named in the run error');
+
   // --- S7: a run left open by a restart is closed at boot.
   const run = await one(`INSERT INTO runs (pipeline_id, status, started_at) VALUES ($1, 'running', now()) RETURNING id`, [P]);
   const ran = await one(`INSERT INTO run_steps (run_id, station_id, status) VALUES ($1, $2, 'running') RETURNING id`, [run.id, A]);
