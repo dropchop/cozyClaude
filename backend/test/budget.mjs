@@ -143,7 +143,22 @@ async function main() {
   const rec = await resolveModel(legacy.id);
   assert(rec.inputPrice === 5 && rec.outputPrice === 25, `legacy alias billed at list price (got ${rec.inputPrice}/${rec.outputPrice})`);
   await query('DELETE FROM custom_models WHERE id = $1', [legacy.id]);
-  console.log('✓ custom-model prices validated; legacy aliases floored at list price');
+  const dated = await one(`INSERT INTO custom_models (label, provider, model_id) VALUES ('dated', 'anthropic', 'claude-haiku-4-5-20251001') RETURNING id`);
+  const datedRec = await resolveModel(dated.id);
+  assert(datedRec.inputPrice === 1 && datedRec.outputPrice === 5, `dated alias billed at list price (got ${datedRec.inputPrice}/${datedRec.outputPrice})`);
+  console.log('✓ custom-model prices validated; legacy aliases (dated too) floored at list price');
+
+  // A legacy paid model with no list price to fall back on must not run unmetered.
+  const free = await one(`INSERT INTO custom_models (label, provider, model_id) VALUES ('Old Gemini', 'google', 'gemini-x') RETURNING id`);
+  const G = await town('Unpriced');
+  await station(G, 'Gem', { model: free.id });
+  const gRun = (await req('POST', `/api/pipelines/${G}/run`, { input: 'hi' })).body;
+  await waitFor(() => terminal(gRun.id), 'unpriced run');
+  const gDetail = (await req('GET', `/api/runs/${gRun.id}`)).body;
+  assert(gDetail.status === 'failed' && /"Old Gemini" has no price/.test(gDetail.error || ''),
+    `unpriced paid model refused (got ${gDetail.status}: ${gDetail.error})`);
+  assert(!events.some((e) => e.event === 'run_step_token' && e.data.run_id === gRun.id), 'no call made for the unpriced model');
+  console.log('✓ a paid model with no price refuses to run');
 
   // --- S8 (server side): every step and token event carries its run's town.
   const townOf = {};

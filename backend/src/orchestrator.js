@@ -1,5 +1,5 @@
 import { query, one } from './db.js';
-import { runAgent, resolveModel, DEFAULT_MODEL, maxOutputTokensForBudget } from './providers/index.js';
+import { runAgent, resolveModel, DEFAULT_MODEL, maxOutputTokensForBudget, isUnpriced } from './providers/index.js';
 import { broadcast } from './ws.js';
 import { numEnv } from './config.js';
 
@@ -222,8 +222,13 @@ async function executeRun(run, stations, connections, input, opts = {}) {
     const approxInputTokens = Math.ceil(((station.system_prompt || '').length + stationInput.length) / 4);
     const remaining = budget.limit - budget.spent;
     const budgetMaxTokens = maxOutputTokensForBudget(modelRecord, remaining, approxInputTokens);
-    if (budgetMaxTokens <= 0) {
-      const message = `run exceeded cost ceiling ($${MAX_RUN_COST_USD.toFixed(2)})`;
+    // A paid model with no price (saved before prices were required) can't be
+    // metered, so it never runs.
+    const refusal = isUnpriced(modelRecord)
+      ? `model "${modelRecord.label}" has no price, so the cost ceiling can't meter it; delete it and add it again with its prices`
+      : budgetMaxTokens <= 0 ? `run exceeded cost ceiling ($${MAX_RUN_COST_USD.toFixed(2)})` : null;
+    if (refusal) {
+      const message = refusal;
       await query(
         `UPDATE run_steps SET status = 'failed', error = $2, finished_at = now() WHERE id = $1`,
         [step.id, message]

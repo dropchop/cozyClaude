@@ -22,6 +22,11 @@ export function builtinModelList() {
   return Object.entries(BUILTIN_MODELS).map(([id, m]) => ({ id, input: m.input, output: m.output }));
 }
 
+// Only an openai-compatible endpoint (e.g. a local model) may be free. A paid
+// provider priced at $0 would run outside the cost ceiling.
+export const mayBeFree = (provider) => provider === 'openai-compatible';
+export const isUnpriced = (record) => !mayBeFree(record.provider) && !(record.inputPrice > 0 && record.outputPrice > 0);
+
 // Resolve a stations.model value (built-in name | custom_models.id UUID | null)
 // into a uniform record. Returns null when the value referred to a custom
 // model that has been deleted; callers decide how to fall back.
@@ -47,7 +52,10 @@ export async function resolveModel(modelField) {
     if (!row) return null;
     // Never bill below zero, nor an Anthropic alias below its list price (rows
     // saved before prices were validated could say 0 or negative).
-    const list = row.provider === 'anthropic' ? BUILTIN_MODELS[row.model_id] : null;
+    // Dated ids (claude-haiku-4-5-20251001) price as their undated alias.
+    const list = row.provider === 'anthropic'
+      ? BUILTIN_MODELS[row.model_id] ?? BUILTIN_MODELS[row.model_id.replace(/-\d{8}$/, '')]
+      : null;
     return {
       provider: row.provider,
       modelId: row.model_id,

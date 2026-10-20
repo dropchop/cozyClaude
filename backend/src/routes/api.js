@@ -1,7 +1,7 @@
 import express from 'express';
 import { query, one, transaction } from '../db.js';
 import { startRun } from '../orchestrator.js';
-import { DEFAULT_MODEL, builtinModelList } from '../providers/index.js';
+import { DEFAULT_MODEL, builtinModelList, mayBeFree } from '../providers/index.js';
 
 const ALLOWED_PROVIDERS = ['anthropic', 'openai', 'google', 'openai-compatible'];
 
@@ -65,9 +65,7 @@ api.post('/models', wrap(async (req, res) => {
   if (![inPrice, outPrice].every((p) => Number.isFinite(p) && p >= 0)) {
     return res.status(400).json({ error: 'prices must be numbers >= 0 (USD per 1M tokens)' });
   }
-  // A paid provider at $0 would run outside the cost ceiling. Only an
-  // openai-compatible endpoint (e.g. a local model) may be free.
-  if (provider !== 'openai-compatible' && !(inPrice > 0 && outPrice > 0)) {
+  if (!mayBeFree(provider) && !(inPrice > 0 && outPrice > 0)) {
     return res.status(400).json({ error: `input and output prices are required for ${provider} models` });
   }
   const row = await one(
