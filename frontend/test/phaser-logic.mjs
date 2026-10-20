@@ -110,6 +110,14 @@ ok(/const \{ event, data \} = msg;\s*if \(!forTown\(data, pidRef\.current\)\) re
   release([{ status: 'running' }]);
   await pending;
   ok(busy === false, 'a stale runs list does not re-mark a finished run busy');
+  // A click while a switch's runs list is in flight: the stale reply must not clear busy.
+  const slow2 = createRunTracker({ listRuns: () => new Promise((r) => { release = r; }), onBusy: (b) => { busy = b; } });
+  const pending2 = slow2.show('A');
+  slow2.started();
+  ok(busy === true, 'a click marks the town busy at once');
+  release([{ status: 'completed' }]);
+  await pending2;
+  ok(busy === true, 'a runs list from before the click does not clear busy');
 }
 
 if (failed) { console.error(`\n${failed} CHECK(S) FAILED`); process.exit(1); }

@@ -27,7 +27,7 @@ export default function PhaserApp() {
   pidRef.current = pipelineId;
   const trackerRef = useRef(null);
   trackerRef.current ??= createRunTracker({
-    listRuns: api.listRuns,
+    listRuns: (pid) => api.listRuns(pid, 1), // the tracker reads only the newest
     onBusy: (busy) => { setRunning(busy); bus.emit('run:active', busy); },
   });
 
@@ -122,10 +122,12 @@ export default function PhaserApp() {
 
   async function runPipeline() {
     if (!pipelineId) return;
-    setRunning(true);
-    bus.emit('run:active', true);
+    trackerRef.current.started();
     (dataRef.current?.stations || []).forEach((s) => bus.emit('house:status', { station_id: s.id, status: 'pending' }));
-    try { await api.run(pipelineId, input); } catch (e) { setRunning(false); bus.emit('run:active', false); setError(e.message); }
+    try { await api.run(pipelineId, input); } catch (e) {
+      setError(e.message);
+      trackerRef.current.show(pipelineId).catch((err) => setError(err.message));
+    }
   }
 
   // ---- HUD actions ----
