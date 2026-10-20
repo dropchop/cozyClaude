@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS run_steps (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   run_id       UUID REFERENCES runs(id) ON DELETE CASCADE,
   station_id   UUID REFERENCES stations(id) ON DELETE CASCADE,
-  status       TEXT NOT NULL DEFAULT 'pending', -- pending | running | completed | failed
+  status       TEXT NOT NULL DEFAULT 'pending', -- pending | running | completed | failed | skipped
   tokens_used   INTEGER,                         -- input + output, kept for back-compat
   input_tokens  INTEGER,
   output_tokens INTEGER,
@@ -126,3 +126,10 @@ CREATE INDEX IF NOT EXISTS idx_run_steps_run        ON run_steps(run_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_step       ON artifacts(run_step_id);
 CREATE INDEX IF NOT EXISTS idx_decorations_pipeline ON decorations(pipeline_id);
 CREATE INDEX IF NOT EXISTS idx_mail_dist_po          ON mail_distributions(post_office_station_id);
+
+-- One tube per ordered pair of houses. Older databases can hold duplicates (each
+-- fed the downstream house the same output twice): keep one of each first, so
+-- the unique index can build. Both statements are idempotent.
+DELETE FROM connections a USING connections b
+ WHERE a.from_station_id = b.from_station_id AND a.to_station_id = b.to_station_id AND a.id > b.id;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_connections_pair ON connections(from_station_id, to_station_id);

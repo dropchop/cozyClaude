@@ -1,11 +1,15 @@
 import express from 'express';
-import { query, one } from '../db.js';
+import { query, one, transaction } from '../db.js';
 import { startRun } from '../orchestrator.js';
 import { DEFAULT_MODEL, builtinModelList } from '../providers/index.js';
 
 const ALLOWED_PROVIDERS = ['anthropic', 'openai', 'google', 'openai-compatible'];
 
 export const api = express.Router();
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (v) => typeof v === 'string' && UUID_RE.test(v);
+const httpError = (status, message) => Object.assign(new Error(message), { status });
 
 const wrap = (fn) => (req, res) => fn(req, res).catch((err) => {
   const status = err.status || 500;
@@ -186,15 +190,31 @@ api.get('/stations/:id/distributions', wrap(async (req, res) => {
 }));
 
 // Replace-all: set the post office's distribution targets to exactly `station_ids`.
+// Validated, then swapped in one transaction, so a bad id never loses the old set.
 api.put('/stations/:id/distributions', wrap(async (req, res) => {
-  const ids = Array.isArray(req.body?.station_ids) ? req.body.station_ids : [];
-  await query('DELETE FROM mail_distributions WHERE post_office_station_id = $1', [req.params.id]);
-  for (const targetId of ids) {
-    await query(
-      'INSERT INTO mail_distributions (post_office_station_id, target_station_id) VALUES ($1, $2)',
-      [req.params.id, targetId]
+  const raw = req.body?.station_ids;
+  if (!Array.isArray(raw) || !raw.every(isUuid)) throw httpError(400, 'station_ids must be an array of station ids');
+  const ids = [...new Set(raw)];
+  await transaction(async (q) => {
+    const [po] = isUuid(req.params.id)
+      ? await q(`SELECT pipeline_id FROM stations WHERE id = $1 AND type = 'post_office'`, [req.params.id])
+      : [];
+    if (!po) throw httpError(404, 'post office not found');
+    const targets = await q(
+      'SELECT id FROM stations WHERE id = ANY($1::uuid[]) AND pipeline_id = $2 AND id <> $3',
+      [ids, po.pipeline_id, req.params.id]
     );
-  }
+    if (targets.length !== ids.length) {
+      throw httpError(400, "every target must be another building in the post office's own town");
+    }
+    await q('DELETE FROM mail_distributions WHERE post_office_station_id = $1', [req.params.id]);
+    for (const targetId of ids) {
+      await q(
+        'INSERT INTO mail_distributions (post_office_station_id, target_station_id) VALUES ($1, $2)',
+        [req.params.id, targetId]
+      );
+    }
+  });
   res.json(ids);
 }));
 
@@ -208,11 +228,37 @@ api.post('/pipelines/:id/connections', wrap(async (req, res) => {
   if (from_station_id === to_station_id) {
     return res.status(400).json({ error: 'cannot connect a station to itself' });
   }
-  const row = await one(
-    `INSERT INTO connections (pipeline_id, from_station_id, to_station_id)
-     VALUES ($1, $2, $3) RETURNING *`,
-    [req.params.id, from_station_id, to_station_id]
-  );
+  if (!isUuid(from_station_id) || !isUuid(to_station_id) || !isUuid(req.params.id)) {
+    throw httpError(400, 'station and neighborhood ids must be uuids');
+  }
+  // Check and insert in one transaction so two concurrent tubes can't form a loop.
+  const row = await transaction(async (q) => {
+    const ends = await q('SELECT id FROM stations WHERE id = ANY($1::uuid[]) AND pipeline_id = $2',
+      [[from_station_id, to_station_id], req.params.id]);
+    if (ends.length !== 2) throw httpError(400, 'both houses must be in this neighborhood');
+    const edges = await q('SELECT from_station_id, to_station_id FROM connections WHERE pipeline_id = $1', [req.params.id]);
+    if (edges.some((e) => e.from_station_id === from_station_id && e.to_station_id === to_station_id)) {
+      throw httpError(409, 'those houses are already connected');
+    }
+    // A path to → … → from means this tube would close a loop, and the run would fail.
+    const next = {};
+    for (const e of edges) (next[e.from_station_id] ||= []).push(e.to_station_id);
+    const seen = new Set();
+    const stack = [to_station_id];
+    while (stack.length) {
+      const id = stack.pop();
+      if (id === from_station_id) throw httpError(400, 'that tube would make a loop');
+      if (seen.has(id)) continue;
+      seen.add(id);
+      stack.push(...(next[id] || []));
+    }
+    const [inserted] = await q(
+      `INSERT INTO connections (pipeline_id, from_station_id, to_station_id)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [req.params.id, from_station_id, to_station_id]
+    );
+    return inserted;
+  });
   res.status(201).json(row);
 }));
 
