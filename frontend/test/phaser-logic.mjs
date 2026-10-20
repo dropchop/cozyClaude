@@ -29,6 +29,8 @@ ok(ctrl.x === 100 && ctrl.y > 0, 'tubeControl bows down');
 ok(HOUSE_STYLES.length === 6, '6 house styles');
 ok(Object.keys(ROOF_COLORS).length === 6, '6 roof colors');
 ok(STATUS_TINT.running === 0xef9a3c && STATUS_TINT.completed === 0x5fae46, 'status tints');
+// Every step status the backend sends has an explicit tint (null = idle roof).
+for (const st of ['pending', 'running', 'completed', 'failed', 'skipped']) ok(st in STATUS_TINT, `tint defined for "${st}"`);
 ok(VILLAGER_VARIANTS.length === 6, '6 villager variants');
 
 // --- pathfinding / collision ---

@@ -36,6 +36,7 @@ export const STATUS_TINT = {
   running: 0xef9a3c,
   completed: 0x5fae46,
   failed: 0xd2603f,
+  skipped: null, // never ran: the run stopped before it, so it keeps its idle roof
 };
 
 const fr = (g, c, x, y, w, h) => g.fillStyle(c, 1).fillRect(x, y, w, h);
