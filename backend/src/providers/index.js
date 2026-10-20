@@ -1,8 +1,12 @@
 import { one } from '../db.js';
 import { BUILTIN_MODELS } from './anthropic.js';
+import { numEnv } from '../config.js';
 
 // Default per-station model. Stations whose `model` column is NULL use this.
 export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'claude-sonnet-4-6';
+
+// Simulated spend per mock call (default 0), so cost ceilings can be exercised offline.
+const MOCK_COST_USD = numEnv('MOCK_LLM_COST_USD', 0);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -140,7 +144,7 @@ export async function runAgent({ system, input, model, maxTokens, onText }) {
       }
     }
     const usage = { input_tokens: (input || '').length, output_tokens: text.length };
-    return { text, usage, model: record.modelId, tokens: usage.input_tokens + usage.output_tokens, cost: 0 };
+    return { text, usage, model: record.modelId, tokens: usage.input_tokens + usage.output_tokens, cost: MOCK_COST_USD };
   }
 
   const provider = await loadProvider(record.provider);
