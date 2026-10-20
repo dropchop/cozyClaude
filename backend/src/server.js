@@ -8,9 +8,10 @@ import { initDb } from './db.js';
 import { initWebSocket } from './ws.js';
 import { api } from './routes/api.js';
 import { originGuard } from './origin.js';
+import { numEnv } from './config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PORT = process.env.PORT || 4000;
+const PORT = numEnv('PORT', 4000);
 
 const app = express();
 app.use(originGuard);

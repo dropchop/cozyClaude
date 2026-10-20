@@ -3,6 +3,9 @@
 import './_env.mjs'; // nothing here opens the DB, but keep the suite's rule
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 process.env.ANTHROPIC_API_KEY ||= 'test-key-not-used'; // provider builds an SDK client at import
 const { numEnv } = await import('../src/config.js');
@@ -38,5 +41,17 @@ for (const name of ['MAX_INPUT_CHARS', 'MAX_RUN_COST_USD', 'MAX_MAIL_DEPTH']) {
   assert(r.status !== 0 && r.stderr.includes(name), `${name}=abc must refuse to boot (status ${r.status})`);
 }
 console.log('✓ a non-numeric MAX_* refuses to boot');
+
+// server.js too: a bad PORT stops it before it opens anything. Run from an empty
+// directory (dotenv finds no .env) with a scratch PGLITE_DIR, so even a server
+// that wrongly starts (old code listens on a pipe named "abc") touches no real data.
+const server = fileURLToPath(new URL('../src/server.js', import.meta.url));
+const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'apb-cfg-'));
+const bad = spawnSync(process.execPath, [server], {
+  cwd: empty, env: { ...process.env, PORT: 'abc', PGLITE_DIR: path.join(empty, 'pg') }, encoding: 'utf8', timeout: 15000,
+});
+fs.rmSync(empty, { recursive: true, force: true });
+assert(bad.status !== 0 && bad.stderr.includes('PORT'), `PORT=abc must refuse to boot (status ${bad.status})`);
+console.log('✓ a non-numeric PORT refuses to boot');
 
 console.log('\nALL CONFIG TESTS PASSED');
