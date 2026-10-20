@@ -45,5 +45,6 @@ export const api = {
   deleteDecoration: (id) => http('DELETE', `/api/decorations/${id}`),
 
   run: (pid, input) => http('POST', `/api/pipelines/${pid}/run`, { input }),
+  listRuns: (pid) => http('GET', `/api/pipelines/${pid}/runs`),
   getRun: (id) => http('GET', `/api/runs/${id}`),
 };

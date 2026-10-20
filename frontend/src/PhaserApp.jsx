@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
+import { createRunTracker } from './runTracker.js';
 import { TownCanvas } from './TownCanvas.jsx';
 import { BuildPalette } from './BuildPalette.jsx';
 import { Inspector } from './Inspector.jsx';
@@ -24,6 +25,11 @@ export default function PhaserApp() {
   const pidRef = useRef(null);
   const outputsRef = useRef({}); // station id → last output text
   pidRef.current = pipelineId;
+  const trackerRef = useRef(null);
+  trackerRef.current ??= createRunTracker({
+    listRuns: api.listRuns,
+    onBusy: (busy) => { setRunning(busy); bus.emit('run:active', busy); },
+  });
 
   // ---- load ----
   const refetchModels = useCallback(() => {
@@ -39,7 +45,10 @@ export default function PhaserApp() {
     if (!id) return;
     api.getPipeline(id).then((p) => { dataRef.current = p; bus.emit('load', p); }).catch((e) => setError(e.message));
   }, []);
-  useEffect(() => { loadPipeline(pipelineId); setSelected(null); }, [pipelineId, loadPipeline]);
+  useEffect(() => {
+    loadPipeline(pipelineId); setSelected(null);
+    trackerRef.current.show(pipelineId).catch((e) => setError(e.message));
+  }, [pipelineId, loadPipeline]);
   useEffect(() => bus.on('scene:ready', () => { if (dataRef.current) bus.emit('load', dataRef.current); }), []);
 
   // ---- push build state to scene ----
@@ -106,10 +115,8 @@ export default function PhaserApp() {
       bus.emit('house:status', { station_id: data.station_id, status: data.status, tokens_used: data.tokens_used, cost_usd: data.cost_usd });
       setIoTick((t) => t + 1);
     } else if (event === 'run_update') {
-      if (data.status === 'completed' || data.status === 'failed') {
-        setRunning(false); bus.emit('run:active', false);
-        if (data.status === 'failed') setError(data.error || 'run failed');
-      }
+      trackerRef.current.event(msg);
+      if (data.status === 'failed') setError(data.error || 'run failed');
     }
   }, []));
 

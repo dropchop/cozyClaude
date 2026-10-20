@@ -8,6 +8,7 @@ import { worldToTile, tileKey } from '../src/world.js';
 import { sceneTownData } from '../src/phaser/townData.js';
 import { readFileSync } from 'node:fs';
 import { forTown } from '../src/useWebSocket.js';
+import { createRunTracker } from '../src/runTracker.js';
 
 let failed = 0;
 const ok = (c, m) => { console.log((c ? '✓' : '✗ FAIL') + ' ' + m); if (!c) failed++; };
@@ -79,6 +80,35 @@ ok(!forTown({ pipeline_id: 'p2', status: 'failed' }, 'p1'), 'another town\'s run
 ok(!forTown({ status: 'failed' }, 'p1') && !forTown(undefined, 'p1') && !forTown({ pipeline_id: 'p1' }, null), 'untagged events ignored');
 const appSrc = readFileSync(new URL('../src/PhaserApp.jsx', import.meta.url), 'utf8');
 ok(/const \{ event, data \} = msg;\s*if \(!forTown\(data, pidRef\.current\)\) return;/.test(appSrc), 'PhaserApp filters run events by town');
+
+// --- run button: busy follows the shown town's runs, not a global flag
+{
+  const runsOf = { A: [], B: [] };
+  let busy = null;
+  const t = createRunTracker({ listRuns: async (pid) => runsOf[pid], onBusy: (b) => { busy = b; } });
+  const ev = (pipeline_id, status) => t.event({ event: 'run_update', data: { pipeline_id, status } });
+  await t.show('A');
+  ev('A', 'running');
+  ok(busy === true, 'own town run starts -> busy');
+  await t.show('B');
+  ok(busy === false, 'switching to an idle town clears busy');
+  ev('A', 'completed');
+  ev('A', 'running');
+  ok(busy === false, 'another town\'s run events leave the shown town alone');
+  runsOf.A = [{ status: 'running' }];
+  await t.show('A');
+  ok(busy === true, 'switching back to a town mid-run shows busy');
+  ev('A', 'completed');
+  ok(busy === false, 'its completion clears busy');
+  // A list reply that arrives after a live event must not overwrite it.
+  let release;
+  const slow = createRunTracker({ listRuns: () => new Promise((r) => { release = r; }), onBusy: (b) => { busy = b; } });
+  const pending = slow.show('A');
+  slow.event({ event: 'run_update', data: { pipeline_id: 'A', status: 'completed' } });
+  release([{ status: 'running' }]);
+  await pending;
+  ok(busy === false, 'a stale runs list does not re-mark a finished run busy');
+}
 
 if (failed) { console.error(`\n${failed} CHECK(S) FAILED`); process.exit(1); }
 console.log('\nALL PHASER-LOGIC CHECKS PASSED');
