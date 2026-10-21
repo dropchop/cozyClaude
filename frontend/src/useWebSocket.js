@@ -1,5 +1,8 @@
 import { useEffect, useRef } from 'react';
 
+// Run events name their town; the HUD acts only on the town it shows.
+export const forTown = (data, pipelineId) => !!data && !!pipelineId && data.pipeline_id === pipelineId;
+
 // Subscribes to the backend WebSocket and calls onEvent({event, data}) for each
 // message. Auto-reconnects on drop.
 export function useWebSocket(onEvent) {

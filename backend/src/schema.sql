@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS run_steps (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   run_id       UUID REFERENCES runs(id) ON DELETE CASCADE,
   station_id   UUID REFERENCES stations(id) ON DELETE CASCADE,
-  status       TEXT NOT NULL DEFAULT 'pending', -- pending | running | completed | failed
+  status       TEXT NOT NULL DEFAULT 'pending', -- pending | running | completed | failed | skipped
   tokens_used   INTEGER,                         -- input + output, kept for back-compat
   input_tokens  INTEGER,
   output_tokens INTEGER,
@@ -126,3 +126,30 @@ CREATE INDEX IF NOT EXISTS idx_run_steps_run        ON run_steps(run_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_step       ON artifacts(run_step_id);
 CREATE INDEX IF NOT EXISTS idx_decorations_pipeline ON decorations(pipeline_id);
 CREATE INDEX IF NOT EXISTS idx_mail_dist_po          ON mail_distributions(post_office_station_id);
+
+-- One tube per ordered pair of houses. Older databases can hold duplicates (each
+-- fed the downstream house the same output twice): keep one of each first, so
+-- the unique index can build. The copy kept is one filed under its houses' own
+-- town whenever there is one, so this never drops a real tube in favour of a
+-- wrong-town copy (deleted below), whatever the ids. Both statements are idempotent.
+WITH ranked AS (
+  SELECT c.id, row_number() OVER (
+    PARTITION BY c.from_station_id, c.to_station_id
+    ORDER BY (f.pipeline_id = c.pipeline_id AND t.pipeline_id = c.pipeline_id) DESC NULLS LAST, c.id
+  ) AS n
+  FROM connections c
+  LEFT JOIN stations f ON f.id = c.from_station_id
+  LEFT JOIN stations t ON t.id = c.to_station_id
+)
+DELETE FROM connections WHERE id IN (SELECT id FROM ranked WHERE n > 1);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_connections_pair ON connections(from_station_id, to_station_id);
+
+-- Rows the API now refuses but older versions stored. They never take part in a
+-- run, and a hidden cross-town distribution target made every later edit of that
+-- post office's checklist fail. Idempotent.
+DELETE FROM connections c USING stations f, stations t
+ WHERE f.id = c.from_station_id AND t.id = c.to_station_id
+   AND (f.pipeline_id IS DISTINCT FROM c.pipeline_id OR t.pipeline_id IS DISTINCT FROM c.pipeline_id);
+DELETE FROM mail_distributions d USING stations po, stations t
+ WHERE po.id = d.post_office_station_id AND t.id = d.target_station_id
+   AND (t.pipeline_id IS DISTINCT FROM po.pipeline_id OR t.id = po.id);

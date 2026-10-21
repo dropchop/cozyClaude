@@ -5,6 +5,10 @@ import { houseSize, houseCenter, houseAnchor, objectDepth, contentBounds, tubeCo
 import { HOUSE_STYLES, ROOF_COLORS, STATUS_TINT, VILLAGER_VARIANTS } from '../src/phaser/textures.js';
 import { buildNav, findPath, randomSpawn } from '../src/phaser/pathfinding.js';
 import { worldToTile, tileKey } from '../src/world.js';
+import { sceneTownData } from '../src/phaser/townData.js';
+import { readFileSync } from 'node:fs';
+import { forTown } from '../src/useWebSocket.js';
+import { createRunTracker } from '../src/runTracker.js';
 
 let failed = 0;
 const ok = (c, m) => { console.log((c ? '✓' : '✗ FAIL') + ' ' + m); if (!c) failed++; };
@@ -25,6 +29,8 @@ ok(ctrl.x === 100 && ctrl.y > 0, 'tubeControl bows down');
 ok(HOUSE_STYLES.length === 6, '6 house styles');
 ok(Object.keys(ROOF_COLORS).length === 6, '6 roof colors');
 ok(STATUS_TINT.running === 0xef9a3c && STATUS_TINT.completed === 0x5fae46, 'status tints');
+// Every step status the backend sends has an explicit tint (null = idle roof).
+for (const st of ['pending', 'running', 'completed', 'failed', 'skipped']) ok(st in STATUS_TINT, `tint defined for "${st}"`);
 ok(VILLAGER_VARIANTS.length === 6, '6 villager variants');
 
 // --- pathfinding / collision ---
@@ -55,6 +61,64 @@ if (Array.isArray(path)) {
   ok(!crosses, 'path never crosses a blocked tile');
 }
 ok(randomSpawn(nav) !== null, 'randomSpawn yields a point');
+
+// --- HUD/scene town data: a new tube pushed by both sides is stored once in each
+const hud = { stations: [{ id: 'a' }], decorations: [], connections: [] };
+const scene = sceneTownData(hud);
+const tubeRow = { id: 't1' };
+hud.connections.push(tubeRow); scene.connections.push(tubeRow);
+hud.decorations.push({ id: 'd1' }); scene.decorations.push(hud.decorations[0]);
+ok(hud.connections.length === 1 && scene.connections.length === 1, 'new tube stored once on each side');
+ok(hud.decorations.length === 1 && scene.decorations.length === 1, 'new decoration stored once on each side');
+ok(scene.stations[0] === hud.stations[0], 'rows stay shared (drags update both)');
+ok(sceneTownData({}).connections.length === 0, 'missing arrays default to empty');
+// TownScene needs a Phaser runtime, so check its wiring by source.
+const sceneSrc = readFileSync(new URL('../src/phaser/TownScene.js', import.meta.url), 'utf8');
+ok(/renderData\(data\) \{\s*this\.data = sceneTownData\(data\);/.test(sceneSrc), 'TownScene.renderData keeps its own copy');
+
+// --- run events: the HUD reacts only to the town it shows
+ok(forTown({ pipeline_id: 'p1', status: 'failed' }, 'p1'), 'own town\'s run event accepted');
+ok(!forTown({ pipeline_id: 'p2', status: 'failed' }, 'p1'), 'another town\'s run event ignored');
+ok(!forTown({ status: 'failed' }, 'p1') && !forTown(undefined, 'p1') && !forTown({ pipeline_id: 'p1' }, null), 'untagged events ignored');
+const appSrc = readFileSync(new URL('../src/PhaserApp.jsx', import.meta.url), 'utf8');
+ok(/const \{ event, data \} = msg;\s*if \(!forTown\(data, pidRef\.current\)\) return;/.test(appSrc), 'PhaserApp filters run events by town');
+
+// --- run button: busy follows the shown town's runs, not a global flag
+{
+  const runsOf = { A: [], B: [] };
+  let busy = null;
+  const t = createRunTracker({ listRuns: async (pid) => runsOf[pid], onBusy: (b) => { busy = b; } });
+  const ev = (pipeline_id, status) => t.event({ event: 'run_update', data: { pipeline_id, status } });
+  await t.show('A');
+  ev('A', 'running');
+  ok(busy === true, 'own town run starts -> busy');
+  await t.show('B');
+  ok(busy === false, 'switching to an idle town clears busy');
+  ev('A', 'completed');
+  ev('A', 'running');
+  ok(busy === false, 'another town\'s run events leave the shown town alone');
+  runsOf.A = [{ status: 'running' }];
+  await t.show('A');
+  ok(busy === true, 'switching back to a town mid-run shows busy');
+  ev('A', 'completed');
+  ok(busy === false, 'its completion clears busy');
+  // A list reply that arrives after a live event must not overwrite it.
+  let release;
+  const slow = createRunTracker({ listRuns: () => new Promise((r) => { release = r; }), onBusy: (b) => { busy = b; } });
+  const pending = slow.show('A');
+  slow.event({ event: 'run_update', data: { pipeline_id: 'A', status: 'completed' } });
+  release([{ status: 'running' }]);
+  await pending;
+  ok(busy === false, 'a stale runs list does not re-mark a finished run busy');
+  // A click while a switch's runs list is in flight: the stale reply must not clear busy.
+  const slow2 = createRunTracker({ listRuns: () => new Promise((r) => { release = r; }), onBusy: (b) => { busy = b; } });
+  const pending2 = slow2.show('A');
+  slow2.started();
+  ok(busy === true, 'a click marks the town busy at once');
+  release([{ status: 'completed' }]);
+  await pending2;
+  ok(busy === true, 'a runs list from before the click does not clear busy');
+}
 
 if (failed) { console.error(`\n${failed} CHECK(S) FAILED`); process.exit(1); }
 console.log('\nALL PHASER-LOGIC CHECKS PASSED');

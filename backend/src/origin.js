@@ -48,12 +48,23 @@ function warnOnce(origin, host) {
     'If this is you (LAN/tailnet name), set ALLOWED_ORIGINS=<your UI origin> in backend/.env.');
 }
 
+// The 403 says what to set: after an upgrade, the owner opening the UI by a
+// tailnet or LAN name meets this in the browser, not in the server log.
+function refusal(origin, host) {
+  if (!isAllowedHost(host)) {
+    return `origin not allowed: this server does not answer to "${host}". If you opened the app at that name, ` +
+      `add its address (for example https://${host}) to ALLOWED_ORIGINS in backend/.env and restart the backend.`;
+  }
+  return `origin not allowed: ${origin}. If that is your UI, add ALLOWED_ORIGINS=${origin} to backend/.env ` +
+    'and restart the backend.';
+}
+
 // Express middleware: refuse cross-origin or foreign-Host callers, grant CORS only to allowed ones.
 export function originGuard(req, res, next) {
   const origin = req.headers.origin;
   if (!isAllowedRequest(origin, req.headers.host)) {
     warnOnce(origin, req.headers.host);
-    return res.status(403).json({ error: 'origin not allowed' });
+    return res.status(403).json({ error: refusal(origin, req.headers.host) });
   }
   if (origin) {
     res.setHeader('Access-Control-Allow-Origin', origin);

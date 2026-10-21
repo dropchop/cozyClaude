@@ -1,8 +1,12 @@
 import { one } from '../db.js';
 import { BUILTIN_MODELS } from './anthropic.js';
+import { numEnv } from '../config.js';
 
 // Default per-station model. Stations whose `model` column is NULL use this.
 export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'claude-sonnet-4-6';
+
+// Simulated spend per mock call (default 0), so cost ceilings can be exercised offline.
+const MOCK_COST_USD = numEnv('MOCK_LLM_COST_USD', 0);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -17,6 +21,11 @@ export function builtinModelIds() {
 export function builtinModelList() {
   return Object.entries(BUILTIN_MODELS).map(([id, m]) => ({ id, input: m.input, output: m.output }));
 }
+
+// Only an openai-compatible endpoint (e.g. a local model) may be free. A paid
+// provider priced at $0 would run outside the cost ceiling.
+export const mayBeFree = (provider) => provider === 'openai-compatible';
+export const isUnpriced = (record) => !mayBeFree(record.provider) && !(record.inputPrice > 0 && record.outputPrice > 0);
 
 // Resolve a stations.model value (built-in name | custom_models.id UUID | null)
 // into a uniform record. Returns null when the value referred to a custom
@@ -41,12 +50,18 @@ export async function resolveModel(modelField) {
   if (UUID_RE.test(name)) {
     const row = await one('SELECT * FROM custom_models WHERE id = $1', [name]);
     if (!row) return null;
+    // Never bill below zero, nor an Anthropic alias below its list price (rows
+    // saved before prices were validated could say 0 or negative).
+    // Dated ids (claude-haiku-4-5-20251001) price as their undated alias.
+    const list = row.provider === 'anthropic'
+      ? BUILTIN_MODELS[row.model_id] ?? BUILTIN_MODELS[row.model_id.replace(/-\d{8}$/, '')]
+      : null;
     return {
       provider: row.provider,
       modelId: row.model_id,
       label: row.label,
-      inputPrice: Number(row.input_price_per_m) || 0,
-      outputPrice: Number(row.output_price_per_m) || 0,
+      inputPrice: Math.max(Number(row.input_price_per_m) || 0, list?.input ?? 0),
+      outputPrice: Math.max(Number(row.output_price_per_m) || 0, list?.output ?? 0),
       supportsThinking: false,
       defaultMaxTokens: 4000,
       baseUrl: row.base_url,
@@ -81,7 +96,7 @@ export function estimateCost(modelRecord, usage) {
 export function maxOutputTokensForBudget(modelRecord, remainingUsd, inputTokens) {
   const inputCost = (inputTokens * modelRecord.inputPrice) / 1_000_000;
   const left = remainingUsd - inputCost;
-  if (left <= 0) return 0;
+  if (!(left > 0)) return 0; // also catches NaN: an unreadable budget allows nothing
   if (!modelRecord.outputPrice) return Number.MAX_SAFE_INTEGER;
   return Math.floor((left * 1_000_000) / modelRecord.outputPrice);
 }
@@ -140,7 +155,7 @@ export async function runAgent({ system, input, model, maxTokens, onText }) {
       }
     }
     const usage = { input_tokens: (input || '').length, output_tokens: text.length };
-    return { text, usage, model: record.modelId, tokens: usage.input_tokens + usage.output_tokens, cost: 0 };
+    return { text, usage, model: record.modelId, tokens: usage.input_tokens + usage.output_tokens, cost: MOCK_COST_USD };
   }
 
   const provider = await loadProvider(record.provider);

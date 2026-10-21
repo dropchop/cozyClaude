@@ -25,6 +25,21 @@ export async function initDb() {
   await db.waitReady;
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   await db.exec(schema);
+  // Runs execute in this process's memory, so a run still open at boot was cut
+  // off by a restart and can never finish: close it and its steps.
+  await db.exec(`
+    UPDATE run_steps SET status = CASE status WHEN 'running' THEN 'failed' ELSE 'skipped' END,
+      error = 'interrupted: the server restarted', finished_at = now()
+     WHERE status IN ('pending', 'running');
+    UPDATE runs SET status = 'failed', error = 'interrupted: the server restarted', finished_at = now()
+     WHERE status IN ('pending', 'running');
+  `);
+}
+
+// Run fn(q) in one transaction; q(sql, params) returns rows. PGlite serialises
+// every query, so other requests wait until it commits or rolls back.
+export async function transaction(fn) {
+  return getDb().transaction((tx) => fn(async (sql, params = []) => (await tx.query(sql, params)).rows));
 }
 
 // Thin helper: run a parameterized query and return the rows array.

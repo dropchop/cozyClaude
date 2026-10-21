@@ -1,17 +1,17 @@
 import { query, one } from './db.js';
-import { runAgent, resolveModel, DEFAULT_MODEL, maxOutputTokensForBudget } from './providers/index.js';
+import { runAgent, resolveModel, DEFAULT_MODEL, maxOutputTokensForBudget, isUnpriced } from './providers/index.js';
 import { broadcast } from './ws.js';
+import { numEnv } from './config.js';
 
 // One active run per pipeline — prevents an accidental double "Start the Day"
 // from firing two parallel pipeline runs.
 const activeRuns = new Set();
-// `??` (not `||`) so an operator can explicitly set the env var to 0 without
-// getting silently rewritten back to the default.
-const MAX_INPUT_CHARS = Number(process.env.MAX_INPUT_CHARS ?? 40000);
-const MAX_RUN_COST_USD = Number(process.env.MAX_RUN_COST_USD ?? 1.0);
+// An explicit 0 is honoured; a non-number refuses to boot (see config.js).
+const MAX_INPUT_CHARS = numEnv('MAX_INPUT_CHARS', 40000);
+const MAX_RUN_COST_USD = numEnv('MAX_RUN_COST_USD', 1.0);
 // How many times a single piece of mail may be relayed post-office → post-office
 // before delivery is refused. Bounds cross-town loops (A→B→A→…) and self-sends.
-const MAX_MAIL_DEPTH = Number(process.env.MAX_MAIL_DEPTH ?? 3);
+const MAX_MAIL_DEPTH = numEnv('MAX_MAIL_DEPTH', 3);
 
 /**
  * Create a run record and kick off execution in the background.
@@ -55,9 +55,14 @@ export async function startRun(pipelineId, input = '', opts = {}) {
     );
     broadcast('run_update', { run_id: run.id, pipeline_id: pipelineId, status: 'running' });
 
+    // One cost ceiling per click: mail-triggered runs inherit the sender's budget
+    // object, so a chain of towns shares MAX_RUN_COST_USD instead of each run
+    // getting a fresh one.
+    const budget = opts.budget ?? { limit: MAX_RUN_COST_USD, spent: 0 };
+
     // Execute without blocking the HTTP response. executeRun's own finally
     // releases the active-run slot for the success path.
-    executeRun(run, stations, connections, input, opts).catch(async (err) => {
+    executeRun(run, stations, connections, input, { ...opts, budget }).catch(async (err) => {
       console.error('run execution error:', err);
       await failRun(run.id, pipelineId, String(err.message || err));
     });
@@ -71,7 +76,9 @@ export async function startRun(pipelineId, input = '', opts = {}) {
 
 async function executeRun(run, stations, connections, input, opts = {}) {
   const pipelineId = run.pipeline_id;
-  const { entryStations = null, entryInput = '', mailDepth = 0 } = opts;
+  const { entryStations = null, entryInput = '', mailDepth = 0, budget } = opts;
+  // Every step event names its town, so a client can ignore other towns' runs.
+  const stepUpdate = (data) => broadcast('run_step_update', { pipeline_id: pipelineId, ...data });
   try {
 
   const stationById = Object.fromEntries(stations.map((s) => [s.id, s]));
@@ -117,7 +124,7 @@ async function executeRun(run, stations, connections, input, opts = {}) {
       [run.id, station.id]
     );
     stepByStation[station.id] = step;
-    broadcast('run_step_update', {
+    stepUpdate({
       run_id: run.id, station_id: station.id, step_id: step.id, status: 'pending',
     });
   }
@@ -150,7 +157,15 @@ async function executeRun(run, stations, connections, input, opts = {}) {
     }
   }
   if (order.length !== activeStations.length) {
-    await failRun(run.id, pipelineId, 'pipeline graph has a cycle');
+    // Name one loop so the owner knows which tube to remove. Every unsorted
+    // station has an unsorted upstream, so walking upstream must repeat.
+    const stuck = new Set(activeStations.map((s) => s.id).filter((id) => indeg[id] > 0));
+    const path = [];
+    let id = stuck.values().next().value;
+    while (!path.includes(id)) { path.push(id); id = upstream[id].find((u) => stuck.has(u)); }
+    const loop = path.slice(path.indexOf(id)).reverse().map((n) => `"${stationById[n].name}"`);
+    await failRun(run.id, pipelineId,
+      `pipeline graph has a cycle: ${[...loop, loop[0]].join(' → ')}; remove one of those tubes`);
     return;
   }
 
@@ -176,7 +191,7 @@ async function executeRun(run, stations, connections, input, opts = {}) {
       : rawInput;
 
     await query(`UPDATE run_steps SET status = 'running', started_at = now() WHERE id = $1`, [step.id]);
-    broadcast('run_step_update', {
+    stepUpdate({
       run_id: run.id, station_id: stationId, step_id: step.id, status: 'running',
     });
 
@@ -185,7 +200,7 @@ async function executeRun(run, stations, connections, input, opts = {}) {
     // local downstream stations. Delivery problems become a receipt, never a run
     // failure.
     if (station.type === 'post_office') {
-      const receipt = await deliverMail(station, stationInput, mailDepth);
+      const receipt = await deliverMail(station, stationInput, mailDepth, budget);
       outputByStation[stationId] = stationInput;
       const artifact = await one(
         `INSERT INTO artifacts (run_step_id, type, content) VALUES ($1, 'text', $2) RETURNING *`,
@@ -196,7 +211,7 @@ async function executeRun(run, stations, connections, input, opts = {}) {
            output_tokens = 0, cost_usd = 0, finished_at = now() WHERE id = $1`,
         [step.id]
       );
-      broadcast('run_step_update', {
+      stepUpdate({
         run_id: run.id, station_id: stationId, step_id: step.id, status: 'completed',
         tokens_used: 0, input_tokens: 0, output_tokens: 0, cost_usd: 0,
         artifact: { id: artifact.id, type: 'text', content: receipt },
@@ -211,16 +226,22 @@ async function executeRun(run, stations, connections, input, opts = {}) {
     // to DEFAULT_MODEL automatically if the station's model field is missing
     // or references a deleted custom model.
     const modelRecord = (await resolveModel(station.model)) || (await resolveModel(DEFAULT_MODEL));
-    const approxInputTokens = Math.ceil(stationInput.length / 4);
-    const remaining = MAX_RUN_COST_USD - totalCost;
+    // The system prompt is billed as input too.
+    const approxInputTokens = Math.ceil(((station.system_prompt || '').length + stationInput.length) / 4);
+    const remaining = budget.limit - budget.spent;
     const budgetMaxTokens = maxOutputTokensForBudget(modelRecord, remaining, approxInputTokens);
-    if (budgetMaxTokens <= 0) {
-      const message = `run exceeded cost ceiling ($${MAX_RUN_COST_USD.toFixed(2)})`;
+    // A paid model with no price (saved before prices were required) can't be
+    // metered, so it never runs.
+    const refusal = isUnpriced(modelRecord)
+      ? `model "${modelRecord.label}" has no price, so the cost ceiling can't meter it; delete it and add it again with its prices`
+      : budgetMaxTokens <= 0 ? `run exceeded cost ceiling ($${MAX_RUN_COST_USD.toFixed(2)})` : null;
+    if (refusal) {
+      const message = refusal;
       await query(
         `UPDATE run_steps SET status = 'failed', error = $2, finished_at = now() WHERE id = $1`,
         [step.id, message]
       );
-      broadcast('run_step_update', {
+      stepUpdate({
         run_id: run.id, station_id: stationId, step_id: step.id, status: 'failed', error: message,
       });
       await failRun(run.id, pipelineId, message,
@@ -237,7 +258,7 @@ async function executeRun(run, stations, connections, input, opts = {}) {
         model: station.model,
         maxTokens: perCallMaxTokens,
         onText: (delta) => broadcast('run_step_token', {
-          run_id: run.id, station_id: stationId, step_id: step.id, delta,
+          pipeline_id: pipelineId, run_id: run.id, station_id: stationId, step_id: step.id, delta,
         }),
       });
     } catch (err) {
@@ -246,7 +267,7 @@ async function executeRun(run, stations, connections, input, opts = {}) {
         `UPDATE run_steps SET status = 'failed', error = $2, finished_at = now() WHERE id = $1`,
         [step.id, message]
       );
-      broadcast('run_step_update', {
+      stepUpdate({
         run_id: run.id, station_id: stationId, step_id: step.id, status: 'failed', error: message,
       });
       await failRun(run.id, pipelineId, `station "${station.name}" failed: ${message}`,
@@ -273,7 +294,7 @@ async function executeRun(run, stations, connections, input, opts = {}) {
        WHERE id = $1`,
       [step.id, result.tokens, inTok, outTok, result.cost]
     );
-    broadcast('run_step_update', {
+    stepUpdate({
       run_id: run.id, station_id: stationId, step_id: step.id, status: 'completed',
       tokens_used: result.tokens, input_tokens: inTok, output_tokens: outTok, cost_usd: result.cost,
       artifact: { id: artifact.id, type: 'text', content: result.text },
@@ -282,7 +303,8 @@ async function executeRun(run, stations, connections, input, opts = {}) {
     // Stop the run if cumulative cost crosses the ceiling.
     totalCost += result.cost || 0;
     totalTokens += result.tokens || 0;
-    if (totalCost > MAX_RUN_COST_USD) {
+    budget.spent += result.cost || 0;
+    if (budget.spent > budget.limit) {
       await failRun(run.id, pipelineId, `run exceeded cost ceiling ($${MAX_RUN_COST_USD.toFixed(2)})`,
         { tokens: totalTokens, cost: totalCost });
       return;
@@ -311,7 +333,7 @@ async function executeRun(run, stations, connections, input, opts = {}) {
  * receipt string (shown as the post office's step output) describing the outcome;
  * it never throws — a busy/missing/looping destination is a receipt, not a failure.
  */
-async function deliverMail(station, mail, mailDepth) {
+async function deliverMail(station, mail, mailDepth, budget) {
   if (!station.send_to_post_office_id) return '📮 No destination set — mail not sent.';
   if (mailDepth >= MAX_MAIL_DEPTH) {
     return `📮 Not forwarded — mail already relayed ${MAX_MAIL_DEPTH} times (loop guard).`;
@@ -333,7 +355,7 @@ async function deliverMail(station, mail, mailDepth) {
   }
   try {
     await startRun(targetPO.pipeline_id, '', {
-      entryStations: targetIds, entryInput: mail, mailDepth: mailDepth + 1,
+      entryStations: targetIds, entryInput: mail, mailDepth: mailDepth + 1, budget,
     });
     return `📮 Delivered to "${townName}" → ${targetIds.length} building(s).`;
   } catch (err) {
@@ -344,6 +366,19 @@ async function deliverMail(station, mail, mailDepth) {
 
 async function failRun(runId, pipelineId, message, totals = {}) {
   try {
+    // Close every step this run will never reach, so no house is left pending.
+    const left = await query(
+      `UPDATE run_steps SET status = CASE status WHEN 'running' THEN 'failed' ELSE 'skipped' END,
+         error = $2, finished_at = now()
+       WHERE run_id = $1 AND status IN ('pending', 'running') RETURNING id, station_id, status`,
+      [runId, message]
+    );
+    for (const step of left) {
+      broadcast('run_step_update', {
+        pipeline_id: pipelineId, run_id: runId, station_id: step.station_id, step_id: step.id,
+        status: step.status, error: message,
+      });
+    }
     await query(
       `UPDATE runs SET status = 'failed', error = $2, total_tokens = $3, total_cost_usd = $4,
          finished_at = now() WHERE id = $1`,

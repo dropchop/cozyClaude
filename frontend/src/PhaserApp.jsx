@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
+import { createRunTracker } from './runTracker.js';
 import { TownCanvas } from './TownCanvas.jsx';
 import { BuildPalette } from './BuildPalette.jsx';
 import { Inspector } from './Inspector.jsx';
-import { useWebSocket } from './useWebSocket.js';
+import { useWebSocket, forTown } from './useWebSocket.js';
 import { HOUSE_STYLES } from './phaser/textures.js';
 import { bus } from './phaser/bus.js';
 
@@ -24,22 +25,30 @@ export default function PhaserApp() {
   const pidRef = useRef(null);
   const outputsRef = useRef({}); // station id → last output text
   pidRef.current = pipelineId;
+  const trackerRef = useRef(null);
+  trackerRef.current ??= createRunTracker({
+    listRuns: (pid) => api.listRuns(pid, 1), // the tracker reads only the newest
+    onBusy: (busy) => { setRunning(busy); bus.emit('run:active', busy); },
+  });
 
   // ---- load ----
   const refetchModels = useCallback(() => {
-    api.models().then(setModels).catch(() => {});
+    api.models().then(setModels).catch((e) => setError(e.message));
   }, []);
 
   useEffect(() => {
     refetchModels();
-    api.listPipelines().then((list) => { setPipelines(list); if (list.length) setPipelineId((c) => c || list[0].id); }).catch(() => {});
+    api.listPipelines().then((list) => { setPipelines(list); if (list.length) setPipelineId((c) => c || list[0].id); }).catch((e) => setError(e.message));
   }, [refetchModels]);
 
   const loadPipeline = useCallback((id) => {
     if (!id) return;
-    api.getPipeline(id).then((p) => { dataRef.current = p; bus.emit('load', p); }).catch(() => {});
+    api.getPipeline(id).then((p) => { dataRef.current = p; bus.emit('load', p); }).catch((e) => setError(e.message));
   }, []);
-  useEffect(() => { loadPipeline(pipelineId); setSelected(null); }, [pipelineId, loadPipeline]);
+  useEffect(() => {
+    loadPipeline(pipelineId); setSelected(null);
+    trackerRef.current.show(pipelineId).catch((e) => setError(e.message));
+  }, [pipelineId, loadPipeline]);
   useEffect(() => bus.on('scene:ready', () => { if (dataRef.current) bus.emit('load', dataRef.current); }), []);
 
   // ---- push build state to scene ----
@@ -100,24 +109,25 @@ export default function PhaserApp() {
   // ---- run visualization over WebSocket ----
   useWebSocket(useCallback((msg) => {
     const { event, data } = msg;
+    if (!forTown(data, pidRef.current)) return;
     if (event === 'run_step_update') {
       if (data.status === 'completed' && data.artifact) outputsRef.current[data.station_id] = data.artifact.content;
       bus.emit('house:status', { station_id: data.station_id, status: data.status, tokens_used: data.tokens_used, cost_usd: data.cost_usd });
       setIoTick((t) => t + 1);
     } else if (event === 'run_update') {
-      if (data.status === 'completed' || data.status === 'failed') {
-        setRunning(false); bus.emit('run:active', false);
-        if (data.status === 'failed') setError(data.error || 'run failed');
-      }
+      trackerRef.current.event(msg);
+      if (data.status === 'failed') setError(data.error || 'run failed');
     }
   }, []));
 
   async function runPipeline() {
     if (!pipelineId) return;
-    setRunning(true);
-    bus.emit('run:active', true);
+    trackerRef.current.started();
     (dataRef.current?.stations || []).forEach((s) => bus.emit('house:status', { station_id: s.id, status: 'pending' }));
-    try { await api.run(pipelineId, input); } catch { setRunning(false); bus.emit('run:active', false); }
+    try { await api.run(pipelineId, input); } catch (e) {
+      setError(e.message);
+      trackerRef.current.show(pipelineId).catch((err) => setError(err.message));
+    }
   }
 
   // ---- HUD actions ----
@@ -215,7 +225,7 @@ export default function PhaserApp() {
         {selected && (
           <Inspector key={selected.id} node={node} models={models} io={io}
             stationId={selected.id} localStations={dataRef.current?.stations} currentPipelineId={pipelineId}
-            onSave={saveHouse} onDelete={deleteHouse} onModelsChanged={refetchModels}
+            onSave={saveHouse} onDelete={deleteHouse} onModelsChanged={refetchModels} onError={setError}
             onClose={() => { setSelected(null); bus.emit('deselect'); }} />
         )}
       </div>

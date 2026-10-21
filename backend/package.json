@@ -17,7 +17,10 @@
     "test:keyroute": "node test/keyroute.mjs",
     "test:patch": "node test/patch-null.mjs",
     "test:nodata": "node test/nodata.mjs",
-    "test": "npm run test:nodata && npm run test:smoke && npm run test:run && npm run test:cost && npm run test:ceiling && npm run test:decor && npm run test:origin && npm run test:keyroute && npm run test:patch"
+    "test:config": "node test/config.mjs",
+    "test:budget": "node test/budget.mjs",
+    "test:graph": "node test/graph.mjs",
+    "test": "npm run test:nodata && npm run test:smoke && npm run test:run && npm run test:cost && npm run test:ceiling && npm run test:decor && npm run test:origin && npm run test:keyroute && npm run test:patch && npm run test:config && npm run test:budget && npm run test:graph"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",

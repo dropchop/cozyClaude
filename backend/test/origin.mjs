@@ -31,6 +31,8 @@ const get = (origin, p = '/api/pipelines', init = {}) =>
 let r = await get('https://evil.example');
 assert(r.status === 403, `evil GET should be 403, got ${r.status}`);
 assert(!r.headers.get('access-control-allow-origin'), 'evil GET must carry no allow-origin');
+const why = (await r.json()).error;
+assert(why.includes('ALLOWED_ORIGINS=https://evil.example'), `403 names the exact setting to add, got: ${why}`);
 r = await get('https://evil.example', '/api/health', { method: 'OPTIONS', headers: { 'Access-Control-Request-Method': 'POST' } });
 assert(r.status === 403 && !r.headers.get('access-control-allow-origin'), 'evil preflight refused');
 r = await get('https://evil.example', '/api/models', {
@@ -61,6 +63,13 @@ assert((await raw({ Host: `rebind.evil.test:${PORT}`, Origin: `http://rebind.evi
 assert((await raw({ Host: `rebind.evil.test:${PORT}` })) === 403, 'rebound Host with no Origin refused');
 assert((await raw({ Host: `box.tailnet.ts.net:${PORT}` })) === 200, 'Host from ALLOWED_ORIGINS hostname allowed');
 assert((await raw({ Host: `dns.example:${PORT}` })) === 403, 'unlisted Host refused');
+const hostWhy = await new Promise((resolve, reject) => {
+  http.get({ host: '127.0.0.1', port: PORT, path: '/', headers: { Host: 'box.other.ts.net' } }, (res) => {
+    let b = ''; res.on('data', (c) => (b += c)); res.on('end', () => resolve(JSON.parse(b).error));
+  }).on('error', reject);
+});
+assert(hostWhy.includes('box.other.ts.net') && hostWhy.includes('ALLOWED_ORIGINS'),
+  `a page load by an unlisted name says which setting to add, got: ${hostWhy}`);
 console.log('✓ DNS rebinding (Host check)');
 
 // WebSocket
