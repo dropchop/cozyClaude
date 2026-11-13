@@ -7,6 +7,12 @@ import { useWebSocket } from './useWebSocket.js';
 import { HOUSE_STYLES } from './phaser/textures.js';
 import { bus } from './phaser/bus.js';
 
+// Way back to the toolkit launcher: Tailscale Serve (https) fronts it on the
+// bare host; on the LAN it listens on :5050.
+const TOOLKIT_HREF = location.protocol === 'https:'
+  ? `https://${location.hostname}/`
+  : `http://${location.hostname}:5050/`;
+
 export default function PhaserApp() {
   const [pipelines, setPipelines] = useState([]);
   const [pipelineId, setPipelineId] = useState(null);
@@ -80,6 +86,8 @@ export default function PhaserApp() {
         setIoTick((t) => t + 1);
       }),
       bus.on('intent:deleteHouse', async (id) => {
+        const name = dataRef.current?.stations.find((st) => st.id === id)?.name;
+        if (!window.confirm(`Delete house "${name || 'this house'}"? Its connections are removed too.`)) return;
         try {
           await api.deleteStation(id);
           if (dataRef.current) {
@@ -159,6 +167,7 @@ export default function PhaserApp() {
   }
 
   async function deleteHouse() {
+    if (!window.confirm(`Delete house "${selected.name || 'this house'}"? Its connections are removed too.`)) return;
     try {
       await api.deleteStation(selected.id);
       if (dataRef.current) {
@@ -191,8 +200,9 @@ export default function PhaserApp() {
   return (
     <div className="app">
       <header className="topbar">
+        <a className="btn btn--link" href={TOOLKIT_HREF}>◂ TOOLKIT</a>
         <div className="brand">🌻 AGENT VALLEY</div>
-        <select className="select" value={pipelineId || ''} onChange={(e) => setPipelineId(e.target.value)}>
+        <select className="select" aria-label="Neighborhood" value={pipelineId || ''} onChange={(e) => setPipelineId(e.target.value)}>
           {pipelines.length === 0 && <option value="">— no neighborhoods —</option>}
           {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
@@ -200,7 +210,15 @@ export default function PhaserApp() {
         <button className="btn" onClick={addHouse} disabled={!pipelineId}>+ HOUSE</button>
         <button className={`btn ${buildMode ? 'btn--on' : ''}`} onClick={() => { setBuildMode((b) => !b); setBrush(null); }} disabled={!pipelineId}>🔨 BUILD</button>
         <div className="spacer" />
-        {error && <div className="error" onClick={() => setError(null)}>⚠ {error}</div>}
+        {/* Always-mounted live region so screen readers announce new errors. */}
+        <div className="error-region" role="alert">
+          {error && (
+            <div className="error">
+              <span className="error__text" title={error}>⚠ {error}</span>
+              <button type="button" className="error__dismiss" aria-label="Dismiss error" onClick={() => setError(null)}>✕</button>
+            </div>
+          )}
+        </div>
       </header>
 
       <div className="main">
