@@ -41,7 +41,7 @@ async function main() {
   const HOST = process.env.HOST || '127.0.0.1';
   server.listen(PORT, HOST, () => {
     console.log(`[server] listening on http://${HOST}:${PORT}`);
-    console.log(`[server] WebSocket on ws://localhost:${PORT}/ws`);
+    console.log(`[server] WebSocket on ws://${HOST}:${PORT}/ws`);
   });
 }
 

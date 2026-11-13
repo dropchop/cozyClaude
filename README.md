@@ -50,6 +50,9 @@ Anything else gets `403`, which also stops other websites you visit from driving
   `https://box.tailnet.ts.net`) needs `ALLOWED_ORIGINS=<that origin>` in `backend/.env`
   (comma-separated for several; optional `ALLOWED_HOSTS` adds bare host names). Without it the Vite
   dev UI half-works: `/ws` connects but `/api` returns `403`, and the server logs `[origin] refused ...`.
+- **The backend listens on `127.0.0.1` only** (`HOST`, default `127.0.0.1`), so it is reachable
+  through Tailscale Serve or an SSH tunnel but not straight from the LAN. To open `./run.sh` at a LAN
+  address such as `http://192.168.1.20:4000`, also set `HOST=0.0.0.0` in `backend/.env`.
 - **`openai-compatible` custom models** (OpenRouter, Groq, Ollama, ...) now read their key from
   `OPENAI_COMPATIBLE_API_KEY`, not `OPENAI_API_KEY`, and `base_url` is only accepted for that provider.
   `OPENAI_API_KEY` is sent only to the official OpenAI endpoint. If such a model returns `401`, set the new variable.
