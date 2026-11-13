@@ -37,9 +37,11 @@ async function main() {
     console.warn('[warn] ANTHROPIC_API_KEY is not set — runs will fail until it is configured.');
   }
 
-  server.listen(PORT, () => {
-    console.log(`[server] listening on http://localhost:${PORT}`);
-    console.log(`[server] WebSocket on ws://localhost:${PORT}/ws`);
+  // Loopback by default: reached via Tailscale Serve (https://…ts.net:4000), not the LAN.
+  const HOST = process.env.HOST || '127.0.0.1';
+  server.listen(PORT, HOST, () => {
+    console.log(`[server] listening on http://${HOST}:${PORT}`);
+    console.log(`[server] WebSocket on ws://${HOST}:${PORT}/ws`);
   });
 }
 
