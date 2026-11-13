@@ -10,7 +10,7 @@ export function BuildPalette({ brush, setBrush, lineMode, setLineMode, onClose }
     <aside className="palette">
       <div className="palette__head">
         <span>🔨 BUILD</span>
-        <button className="btn btn--icon" onClick={onClose}>✕</button>
+        <button type="button" className="btn btn--icon" aria-label="Close build palette" onClick={onClose}>✕</button>
       </div>
       <p className="palette__hint">
         Pick an item, then <b>click&nbsp;or drag</b> on the meadow to build. Roads &amp; paths

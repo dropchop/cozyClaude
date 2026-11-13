@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
 
 const PROVIDERS = [
@@ -24,6 +24,28 @@ export function AddModelDialog({ onCreated, onClose, custom = [], onDeleted }) {
   const [error, setError] = useState(null);
 
   const meta = PROVIDERS.find((p) => p.value === provider);
+  const dialogRef = useRef(null);
+
+  // Modal focus handling: move focus in on open, keep Tab inside, Esc closes,
+  // and hand focus back to whatever opened the dialog when it unmounts.
+  useEffect(() => {
+    const opener = document.activeElement;
+    const el = dialogRef.current;
+    el?.querySelector('select, input, button:not([aria-label="Close"])')?.focus();
+    return () => { if (opener && document.contains(opener)) opener.focus(); };
+  }, []);
+
+  function onKeyDown(e) {
+    if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
+    if (e.key !== 'Tab') return;
+    const items = [...dialogRef.current.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+    )];
+    if (!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
 
   async function save(e) {
     e.preventDefault();
@@ -60,10 +82,12 @@ export function AddModelDialog({ onCreated, onClose, custom = [], onDeleted }) {
 
   return (
     <div className="add-model-dialog__backdrop" onClick={onClose}>
-      <form className="add-model-dialog" onClick={(e) => e.stopPropagation()} onSubmit={save}>
+      <form className="add-model-dialog" ref={dialogRef} role="dialog" aria-modal="true"
+        aria-labelledby="add-model-title" onKeyDown={onKeyDown}
+        onClick={(e) => e.stopPropagation()} onSubmit={save}>
         <div className="add-model-dialog__head">
-          <h4>＋ ADD MODEL</h4>
-          <button type="button" className="btn btn--icon" onClick={onClose}>✕</button>
+          <h4 id="add-model-title">＋ ADD MODEL</h4>
+          <button type="button" className="btn btn--icon" aria-label="Close" onClick={onClose}>✕</button>
         </div>
 
         <label className="field">
@@ -101,7 +125,7 @@ export function AddModelDialog({ onCreated, onClose, custom = [], onDeleted }) {
           </label>
         </div>
 
-        {error && <div className="add-model-dialog__error">⚠ {error}</div>}
+        {error && <div className="add-model-dialog__error" role="alert">⚠ {error}</div>}
 
         <div className="add-model-dialog__actions">
           <button type="submit" className="btn btn--run" disabled={busy || !modelId.trim()}>
@@ -116,7 +140,7 @@ export function AddModelDialog({ onCreated, onClose, custom = [], onDeleted }) {
             {custom.map((c) => (
               <div key={c.id} className="model-list-row">
                 <span className="model-list-row__name">{c.label} · {c.provider}</span>
-                <button type="button" className="model-delete" title="Delete model" onClick={() => remove(c)}>🗑</button>
+                <button type="button" className="model-delete" title="Delete model" aria-label={`Delete model ${c.label}`} onClick={() => remove(c)}>🗑</button>
               </div>
             ))}
           </div>

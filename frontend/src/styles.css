@@ -45,7 +45,8 @@ html, body, #root {
 .town-canvas-wrap { flex: 1; position: relative; display: flex; overflow: hidden; }
 .town-canvas { flex: 1; position: relative; overflow: hidden; }
 .town-canvas canvas { display: block; }
-.brand__tag { font-family: var(--read); font-size: 13px; color: #fff4d6; opacity: 0.7; margin-left: 6px; }
+/* Solid dark-wood pill instead of 0.7 opacity cream on wood (3.4:1 -> 6.4:1). */
+.brand__tag { font-family: var(--read); font-size: 13px; color: #fff4d6; background: var(--wood-dk); padding: 0 5px; border-radius: 3px; margin-left: 6px; }
 
 /* ---------- wood UI bars ---------- */
 .topbar, .runbar {
@@ -69,7 +70,7 @@ html, body, #root {
 
 /* ---------- pixel buttons / selects ---------- */
 .select, .btn {
-  font-family: var(--pixel); font-size: 9px;
+  font-family: var(--pixel); font-size: 10px;
   color: var(--ink); background: var(--panel);
   border: 3px solid var(--wood-dk);
   box-shadow: 3px 3px 0 var(--shadow), inset 2px 2px 0 rgba(255,255,255,0.45);
@@ -81,15 +82,34 @@ html, body, #root {
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn--run { background: var(--green); color: #08260c; }
 .btn--run:hover:not(:disabled) { background: #6dc053; }
-.btn--danger { background: var(--red); color: #fff; }
+/* Darker brick red so white text clears 4.5:1 (was 3.8:1 on --red). */
+.btn--danger { background: #a8432a; color: #fff; }
+.btn--danger:hover:not(:disabled) { background: #b84c31; }
 .btn--on { background: var(--yellow); color: #4a3300; box-shadow: 3px 3px 0 var(--shadow), inset 2px 2px 0 rgba(255,255,255,0.5); }
 .btn--icon { padding: 6px 9px; }
+/* "◂ TOOLKIT" home link: a real <a>, dressed as a pixel button */
+.btn--link { display: inline-block; text-decoration: none; }
+.error-region { display: flex; min-width: 0; }
 .error {
-  font-family: var(--pixel); font-size: 9px;
-  background: var(--red); color: #fff; padding: 8px 10px;
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--pixel); font-size: 10px;
+  background: #a8432a; color: #fff; padding: 4px 4px 4px 10px;
   border: 3px solid var(--wood-darker); box-shadow: 3px 3px 0 var(--shadow);
-  cursor: pointer; max-width: 34vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  border-radius: 4px;
+  max-width: 34vw; border-radius: 4px;
+}
+.error__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.error__dismiss {
+  flex-shrink: 0; font-family: var(--pixel); font-size: 10px; line-height: 1;
+  min-width: 28px; min-height: 28px; padding: 0 6px; cursor: pointer;
+  color: #fff; background: rgba(0,0,0,0.25); border: 2px solid #fff4d6; border-radius: 3px;
+}
+.error__dismiss:hover { background: rgba(0,0,0,0.45); }
+
+/* Keyboard focus ring: yellow sandwiched in dark wood so it reads on both the
+   cream panels and the wood bars. */
+:focus-visible {
+  outline: 2px solid #fcee0a; outline-offset: 2px;
+  box-shadow: 0 0 0 6px var(--wood-darker);
 }
 
 /* ---------- meadow (dithered 16-bit grass) ---------- */
@@ -123,9 +143,9 @@ html, body, #root {
 /* build palette: tool row + bulldozer + line toggle */
 .palette__tools { display: flex; gap: 6px; margin-bottom: 6px; }
 .palette__tools .palette__tool { flex: 1; margin-bottom: 0; }
-.palette__tool--bull.palette__tool--on { background: var(--red); color: #fff; border-color: #9c4234; }
+.palette__tool--bull.palette__tool--on { background: #a8432a; color: #fff; border-color: #7a2f1e; }
 .line-toggle { margin: 0 0 8px; padding: 7px; border: 2px dashed var(--wood-dk); border-radius: 4px; background: rgba(255,255,255,0.25); }
-.line-toggle__label { display: block; font-family: var(--pixel); font-size: 7px; color: var(--wood-dk); margin-bottom: 5px; }
+.line-toggle__label { display: block; font-family: var(--pixel); font-size: 10px; color: var(--wood-dk); margin-bottom: 5px; }
 .line-toggle__opts { display: flex; gap: 5px; }
 .line-toggle__opt { flex: 1; font-family: var(--read); font-size: 14px; padding: 5px; border: 2px solid var(--wood-dk); background: var(--cream); color: var(--ink); border-radius: 4px; cursor: pointer; }
 .line-toggle__opt--on { background: var(--green); color: #08260c; border-color: #2f6f2c; }
@@ -202,7 +222,7 @@ html, body, #root {
 .palette__hint { font-family: var(--read); font-size: 14px; line-height: 1.1; margin: 0 0 8px; color: #5a4326; }
 .palette__tool { width: 100%; font-family: var(--read); font-size: 16px; padding: 7px; margin-bottom: 6px; border: 2px solid var(--wood-dk); background: var(--cream); color: var(--ink); border-radius: 4px; cursor: pointer; }
 .palette__tool--on { background: var(--green); color: #08260c; border-color: #2f6f2c; }
-.palette__group-title { font-family: var(--pixel); font-size: 8px; color: var(--wood-dk); margin: 10px 0 5px; }
+.palette__group-title { font-family: var(--pixel); font-size: 10px; color: var(--wood-dk); margin: 10px 0 5px; }
 .palette__items { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
 .palette__item {
   display: flex; flex-direction: column; align-items: center; gap: 2px;
@@ -228,7 +248,7 @@ html, body, #root {
 .smoke { position: absolute; top: -6px; left: 2px; width: 6px; height: 6px; background: rgba(235,235,235,0.9); border-radius: 50%; opacity: 0; }
 .bldg__sign {
   position: relative; z-index: 2; margin: -2px auto 0; width: fit-content; max-width: 180px; padding: 4px 12px;
-  font-family: var(--pixel); font-size: 9px; color: #fff4d6;
+  font-family: var(--pixel); font-size: 10px; color: #fff4d6;
   background: var(--wood-dk); border: 3px solid var(--wood-darker);
   box-shadow: 0 3px 0 rgba(0,0,0,0.3); border-radius: 3px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -265,10 +285,10 @@ html, body, #root {
 .bldg__flower--c { --c: #f0f0f0; }
 .bldg__door { width: 34px; height: 30px; margin: 8px auto 0; background: #8a5326; border: 3px solid #4a2c12; border-bottom: none; border-radius: 14px 14px 0 0; position: relative; }
 .bldg__door::after { content: ''; position: absolute; right: 5px; top: 14px; width: 4px; height: 4px; background: var(--yellow); border-radius: 50%; }
-.bldg__banner { position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%); font-family: var(--pixel); font-size: 7px; color: #6a4420; background: rgba(255,255,255,0.55); padding: 2px 5px; white-space: nowrap; border-radius: 2px; }
+.bldg__banner { position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%); font-family: var(--pixel); font-size: 10px; color: #6a4420; background: rgba(255,255,255,0.55); padding: 2px 5px; white-space: nowrap; border-radius: 2px; }
 .bldg__yard { padding: 6px 8px; background: var(--wood-dk); color: var(--cream); border: 4px solid var(--wood-darker); border-top: none; border-radius: 0 0 5px 5px; }
 .bldg__statusrow { display: flex; align-items: center; gap: 8px; }
-.bldg__status { font-family: var(--pixel); font-size: 8px; }
+.bldg__status { font-family: var(--pixel); font-size: 10px; }
 .bldg__status--idle { color: #cdbfa0; }
 .bldg__status--pending { color: var(--orange); }
 .bldg__status--running { color: var(--yellow); }
@@ -335,7 +355,7 @@ html, body, #root {
 .inspector__head { display: flex; align-items: center; justify-content: space-between; }
 .inspector__head h3 { margin: 0; font-family: var(--pixel); font-size: 12px; color: var(--wood-dk); text-shadow: 1px 1px 0 rgba(255,255,255,0.5); }
 .field { display: flex; flex-direction: column; gap: 5px; }
-.field > span { font-family: var(--pixel); font-size: 8px; color: var(--ink); line-height: 1.6; }
+.field > span { font-family: var(--pixel); font-size: 10px; color: var(--ink); line-height: 1.6; }
 .field--grow { flex: 1; }
 .field input, .field select, .field textarea {
   font-family: var(--read); font-size: 17px; padding: 8px;
@@ -408,3 +428,14 @@ html, body, #root {
 /* ---------- react-flow chrome ---------- */
 .react-flow__controls button { background: var(--panel); border: 2px solid var(--wood-dk); color: var(--ink); box-shadow: 2px 2px 0 var(--shadow); }
 .react-flow__minimap { border: 3px solid var(--wood-dk); border-radius: 4px; }
+
+/* ---------- reduced motion: stop the looping flicker / bob / puff ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .lamp-glow, .water__ripple,
+  .villager-wrap[data-walking='1'] .villager,
+  .villager-wrap[data-walking='1'] .villager__leg--l,
+  .villager-wrap[data-walking='1'] .villager__leg--r,
+  .bldg--running .bldg__flag-cloth,
+  .bldg--running .smoke { animation: none !important; }
+  .btn:active:not(:disabled) { transform: none; }
+}

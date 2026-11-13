@@ -87,7 +87,7 @@ export function Inspector({ node, models, onSave, onDelete, onClose, io, onModel
     <aside className="inspector">
       <div className="inspector__head">
         <h3>{isPostOffice ? '📮 POST OFFICE' : '🏡 HOUSE'}</h3>
-        <button className="btn btn--icon" onClick={onClose}>✕</button>
+        <button type="button" className="btn btn--icon" aria-label="Close inspector" onClick={onClose}>✕</button>
       </div>
 
       <label className="field">
@@ -165,6 +165,7 @@ export function Inspector({ node, models, onSave, onDelete, onClose, io, onModel
               type="button"
               className="add-model-btn"
               title="Add or manage models"
+              aria-label="Add or manage models"
               onClick={() => setShowAddModel(true)}
             >＋</button>
           )}
